@@ -28,8 +28,36 @@ except ImportError:
     PYTORCHVIDEO_AVAILABLE = False
     EncodedVideo = None
     ApplyTransformToKey = None
-    ShortSideScale = None
     UniformTemporalSubsample = None
+
+    # Fallback implementation of ShortSideScale for when pytorchvideo is not available
+    class ShortSideScale:
+        def __init__(self, size):
+            self.size = size
+
+        def __call__(self, x):
+            """
+            Args:
+                x (torch.Tensor): Video tensor of shape (C, T, H, W)
+            Returns:
+                torch.Tensor: Resized video tensor
+            """
+            c, t, h, w = x.shape
+            if h < w:
+                new_h = self.size
+                new_w = int(w * (self.size / h))
+            else:
+                new_w = self.size
+                new_h = int(h * (self.size / w))
+
+            # Resize using interpolate
+            x = torch.nn.functional.interpolate(
+                x.permute(1, 0, 2, 3),  # (T, C, H, W)
+                size=(new_h, new_w),
+                mode='bilinear',
+                align_corners=False
+            )
+            return x.permute(1, 0, 2, 3)  # Back to (C, T, H, W)
 
 OPENAI_DATASET_MEAN = (0.48145466, 0.4578275, 0.40821073)
 OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
