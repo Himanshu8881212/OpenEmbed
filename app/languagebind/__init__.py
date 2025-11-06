@@ -67,6 +67,14 @@ class LanguageBind(nn.Module):
                 cache_dir=cache_dir,
                 attn_implementation="eager"  # Use eager attention (default) to avoid compatibility issues
             )
+
+            # Ensure _attn_implementation is set on all configs to avoid KeyError
+            if hasattr(model, 'config') and not hasattr(model.config, '_attn_implementation'):
+                model.config._attn_implementation = "eager"
+            if hasattr(model, 'vision_model') and hasattr(model.vision_model, 'config'):
+                if not hasattr(model.vision_model.config, '_attn_implementation'):
+                    model.vision_model.config._attn_implementation = "eager"
+
             self.modality_encoder[k] = model.vision_model
             self.modality_proj[k] = model.visual_projection
             self.modality_scale[k] = model.logit_scale
