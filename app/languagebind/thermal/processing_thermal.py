@@ -27,6 +27,9 @@ def get_thermal_transform(config):
 
 def load_and_transform_thermal(thermal_path, transform):
     thermal = Image.open(thermal_path)
+    # Convert grayscale thermal images to RGB (3 channels)
+    if thermal.mode != 'RGB':
+        thermal = thermal.convert('RGB')
     thermal_outputs = transform(thermal)
     return thermal_outputs
 
