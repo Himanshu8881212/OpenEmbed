@@ -26,12 +26,15 @@ ENV DEVICE=cpu
 COPY requirements.txt .
 
 # Install Python dependencies with specific versions for LanguageBind
+# Install PyTorch first with CPU builds from PyTorch index
 RUN pip install --upgrade pip && \
-    pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install "numpy<2.0.0" && \
-    pip install peft==0.4.0 && \
-    pip install einops opencv-python scipy scikit-learn SoundFile ftfy && \
-    pip install -r requirements.txt
+    pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+
+# Install all other dependencies from requirements.txt (includes numpy<2.0.0 and transformers>=4.35.0)
+RUN pip install -r requirements.txt
+
+# Install additional packages not in requirements.txt
+RUN pip install peft==0.4.0
 
 # Copy application code (including app/languagebind and app/open_clip)
 COPY . .
