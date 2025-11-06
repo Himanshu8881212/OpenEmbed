@@ -8,6 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
+    cmake \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -15,6 +16,10 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libgl1 \
     ffmpeg \
+    libavcodec-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,6 +38,18 @@ RUN pip install --upgrade pip && \
 # Install all other dependencies from requirements.txt
 # This includes transformers==4.30.2, tokenizers==0.13.3, numpy==1.23.0 (official versions)
 RUN pip install -r requirements.txt
+
+# Build and install decord from source (required for ARM64/aarch64 compatibility)
+# Decord is needed for video processing in LanguageBind
+RUN git clone --recursive https://github.com/dmlc/decord /tmp/decord && \
+    cd /tmp/decord && \
+    git checkout v0.6.0 && \
+    mkdir build && cd build && \
+    cmake .. -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && \
+    cd ../python && \
+    pip install -e . && \
+    cd / && rm -rf /tmp/decord
 
 # Copy application code (including app/languagebind and app/open_clip)
 COPY . .

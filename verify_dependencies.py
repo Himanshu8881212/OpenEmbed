@@ -30,6 +30,9 @@ def check_version(package_name, expected_version):
         elif package_name == "tokenizers":
             import tokenizers
             actual = tokenizers.__version__
+        elif package_name == "decord":
+            import decord
+            actual = decord.__version__
         else:
             return True, "skipped"
 
@@ -59,6 +62,7 @@ def main():
         "scipy": "1.10.1",
         "opencv-python": "4.7.0.72",
         "einops": "0.6.1",
+        "decord": "0.6.0",
     }
 
     all_pass = True
