@@ -68,12 +68,15 @@ class LanguageBind(nn.Module):
                 attn_implementation="eager"  # Use eager attention (default) to avoid compatibility issues
             )
 
-            # Ensure _attn_implementation is set on all configs to avoid KeyError
-            if hasattr(model, 'config') and not hasattr(model.config, '_attn_implementation'):
-                model.config._attn_implementation = "eager"
-            if hasattr(model, 'vision_model') and hasattr(model.vision_model, 'config'):
-                if not hasattr(model.vision_model.config, '_attn_implementation'):
-                    model.vision_model.config._attn_implementation = "eager"
+            # Recursively set _attn_implementation on all configs to avoid KeyError
+            def set_attn_implementation(module):
+                """Recursively set _attn_implementation on all submodules with config"""
+                if hasattr(module, 'config'):
+                    module.config._attn_implementation = "eager"
+                for child in module.children():
+                    set_attn_implementation(child)
+
+            set_attn_implementation(model)
 
             self.modality_encoder[k] = model.vision_model
             self.modality_proj[k] = model.visual_projection
