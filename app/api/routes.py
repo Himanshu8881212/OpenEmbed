@@ -783,3 +783,169 @@ async def embed_batch_files(
     except Exception as e:
         logger.error(f"Error in embed_batch_files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search_vector_store(
+    file: UploadFile = File(...),
+    vector_store: str = Form(...),
+    modality: Optional[str] = Form(None),
+    n_results: int = Form(10),
+    filter_modality: Optional[str] = Form(None)
+):
+    """
+    Cross-modal search: Upload a query file (text/image/video/audio/depth/thermal)
+    and find similar items in the vector store.
+
+    This implements cross-modal retrieval using LanguageBind's shared embedding space.
+    For example:
+    - Upload an image to find similar images, videos, or text descriptions
+    - Upload text to find relevant images, videos, or audio
+    - Upload audio to find related videos or images
+
+    Args:
+        file: Query file (any supported modality)
+        vector_store: Name of the vector store to search
+        modality: Optional explicit modality (auto-detected if not provided)
+        n_results: Number of results to return (default: 10)
+        filter_modality: Optional filter to only return results of specific modality
+
+    Returns:
+        SearchResponse with ranked results and similarity scores
+    """
+    try:
+        # Validate vector store exists
+        if not chroma_service.collection_exists(vector_store):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store '{vector_store}' not found"
+            )
+
+        # Auto-detect or validate modality
+        if modality is None:
+            detected_modality = modality_detector.detect_modality(file.filename)
+            if detected_modality is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not detect modality for file '{file.filename}'. Please specify modality explicitly."
+                )
+            modality_type = detected_modality
+            logger.info(f"Auto-detected modality '{modality_type.value}' for query file '{file.filename}'")
+        else:
+            try:
+                modality_type = ModalityType(modality)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid modality: {modality}. Must be one of: text, image, video, audio, depth, thermal"
+                )
+
+            # Validate file extension matches modality
+            if not modality_detector.validate_file_for_modality(file.filename, modality_type):
+                supported_formats = modality_detector.get_supported_formats(modality_type)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File extension does not match modality '{modality}'. Supported formats: {supported_formats}"
+                )
+
+        # Save uploaded query file temporarily
+        file_id = file_handler.save_upload_file(file, modality_type.value)
+        file_path = file_handler.get_file_path(file_id)
+
+        try:
+            # Generate embedding for query file
+            logger.info(f"Generating query embedding for {modality_type.value} file: {file.filename}")
+
+            if modality_type == ModalityType.TEXT:
+                # Read text content
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text_content = f.read()
+                query_embedding = languagebind_service.generate_text_embedding(text_content)
+            elif modality_type == ModalityType.IMAGE:
+                query_embedding = languagebind_service.generate_image_embedding(str(file_path))
+            elif modality_type == ModalityType.VIDEO:
+                query_embedding = languagebind_service.generate_video_embedding(str(file_path))
+            elif modality_type == ModalityType.AUDIO:
+                query_embedding = languagebind_service.generate_audio_embedding(str(file_path))
+            elif modality_type == ModalityType.DEPTH:
+                query_embedding = languagebind_service.generate_depth_embedding(str(file_path))
+            elif modality_type == ModalityType.THERMAL:
+                query_embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported modality: {modality_type.value}"
+                )
+
+            logger.info(f"Generated query embedding with shape: {query_embedding.shape}")
+
+            # Prepare metadata filter if specified
+            where_filter = None
+            if filter_modality:
+                try:
+                    filter_mod = ModalityType(filter_modality)
+                    where_filter = {"modality": filter_mod.value}
+                    logger.info(f"Filtering results to modality: {filter_mod.value}")
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid filter_modality: {filter_modality}"
+                    )
+
+            # Search in vector store
+            search_results = chroma_service.search(
+                collection_name=vector_store,
+                query_embedding=query_embedding,
+                n_results=n_results,
+                where=where_filter,
+                include_metadata=True
+            )
+
+            if search_results is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Search failed"
+                )
+
+            # Format results
+            results = []
+            ids = search_results['ids'][0]
+            distances = search_results['distances'][0]
+            metadatas = search_results.get('metadatas', [[]])[0]
+
+            for i, (result_id, distance, metadata) in enumerate(zip(ids, distances, metadatas)):
+                # Convert distance to similarity score (cosine similarity)
+                # ChromaDB uses L2 distance by default, convert to similarity
+                # similarity = 1 / (1 + distance)
+                similarity = 1.0 - (distance / 2.0)  # Normalize to [0, 1]
+
+                results.append(SearchResult(
+                    id=result_id,
+                    similarity=float(similarity),
+                    distance=float(distance),
+                    modality=metadata.get('modality', 'unknown'),
+                    metadata=metadata,
+                    rank=i + 1
+                ))
+
+            logger.info(f"Search completed: found {len(results)} results")
+
+            return SearchResponse(
+                success=True,
+                query_modality=modality_type.value,
+                vector_store=vector_store,
+                n_results=len(results),
+                results=results,
+                filter_modality=filter_modality
+            )
+
+        finally:
+            # Clean up temporary query file
+            file_handler.delete_file(file_id)
+            logger.info(f"Cleaned up temporary query file: {file_id}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in search_vector_store: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -6,14 +6,14 @@ openEmbed supports **6 modalities** with comprehensive file format support and *
 
 | Modality | Icon | Formats | Total |
 |----------|------|---------|-------|
-| **Text** | 📝 | `.txt`, `.md`, `.pdf`, `.doc`, `.docx`, `.rtf`, `.odt` | 7 |
+| **Text** | 📝 | `.txt`, `.json`, `.md`, `.pdf`, `.doc`, `.docx`, `.rtf`, `.odt` | 8 |
 | **Image** | 🖼️ | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.gif`, `.tiff`, `.tif`, `.webp`, `.svg` | 9 |
 | **Video** | 🎥 | `.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.flv`, `.wmv`, `.m4v`, `.mpg`, `.mpeg` | 10 |
 | **Audio** | 🔊 | `.wav`, `.mp3`, `.flac`, `.m4a`, `.aac`, `.ogg`, `.wma`, `.opus` | 8 |
 | **Depth** | 📊 | `.png`*, `.npy`, `.npz`, `.exr`, `.pfm` | 5 |
 | **Thermal** | 🌡️ | `.jpg`*, `.jpeg`*, `.png`*, `.tiff`, `.tif` | 5 |
 
-**Total: 44 supported file formats**
+**Total: 45 supported file formats**
 
 > **⚠️ Important Notes on Format Priority**:
 > - Common image formats (`.jpg`, `.jpeg`, `.png`, `.bmp`, `.gif`, `.webp`, `.svg`) are **automatically routed to the IMAGE modality**
@@ -349,13 +349,127 @@ Check the `errors` array in the response for details on failed files.
 
 ---
 
+---
+
+## 🔍 Cross-Modal Search
+
+openEmbed supports **cross-modal retrieval** using LanguageBind's shared embedding space. This means you can:
+
+- 🖼️ **Search with an image** to find similar images, videos, or text descriptions
+- 📝 **Search with text** to find relevant images, videos, or audio
+- 🎥 **Search with video** to find similar videos or related images
+- 🔊 **Search with audio** to find related videos, images, or text
+- 📊 **Search with depth maps** to find similar spatial structures
+- 🌡️ **Search with thermal images** to find similar heat patterns
+
+### How It Works
+
+LanguageBind creates a **unified embedding space** where all 6 modalities are aligned. This allows semantic search across different modalities:
+
+1. **Upload query file** (any modality)
+2. **Generate embedding** using the appropriate model
+3. **Search vector store** using cosine similarity
+4. **Return ranked results** from any or specific modality
+
+### API Endpoint
+
+```bash
+POST /search
+```
+
+**Parameters:**
+- `file` - Query file (any supported modality)
+- `vector_store` - Name of vector store to search
+- `modality` - Optional explicit modality (auto-detected if not provided)
+- `n_results` - Number of results to return (default: 10)
+- `filter_modality` - Optional filter to only return specific modality
+
+**Example 1: Text → Image Search**
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -F "file=@query.txt" \
+  -F "vector_store=my_store" \
+  -F "n_results=5" \
+  -F "filter_modality=image"
+```
+
+**Example 2: Image → All Modalities**
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -F "file=@photo.jpg" \
+  -F "vector_store=my_store" \
+  -F "n_results=10"
+```
+
+**Example 3: Video → Video Search**
+
+```python
+import requests
+
+with open('query_video.mp4', 'rb') as f:
+    response = requests.post(
+        'http://localhost:8000/search',
+        files={'file': ('query.mp4', f)},
+        data={
+            'vector_store': 'video_collection',
+            'modality': 'video',
+            'n_results': 5,
+            'filter_modality': 'video'
+        }
+    )
+
+results = response.json()
+for result in results['results']:
+    print(f"Rank {result['rank']}: {result['modality']} - Similarity: {result['similarity']:.4f}")
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "query_modality": "text",
+  "vector_store": "my_store",
+  "n_results": 5,
+  "filter_modality": "image",
+  "results": [
+    {
+      "id": "abc-123",
+      "similarity": 0.8542,
+      "distance": 0.2916,
+      "modality": "image",
+      "metadata": {
+        "modality": "image",
+        "added_at": "2024-01-15T10:30:00"
+      },
+      "rank": 1
+    },
+    ...
+  ]
+}
+```
+
+### Use Cases
+
+1. **Multi-Modal RAG**: Build RAG systems that can retrieve across text, images, and videos
+2. **Visual Search**: Find images using text descriptions or vice versa
+3. **Content Discovery**: Discover related content across different media types
+4. **Semantic Similarity**: Find semantically similar content regardless of format
+5. **Cross-Modal Recommendation**: Recommend videos based on image queries
+
+---
+
 ## 🎉 Summary
 
 openEmbed provides:
-- ✅ **44 supported file formats** across 6 modalities
+- ✅ **45 supported file formats** across 6 modalities
 - ✅ **Automatic modality detection** from file extensions
 - ✅ **Batch upload** with mixed modalities
+- ✅ **Cross-modal search** using LanguageBind's shared embedding space
 - ✅ **Embedding preview** for verification
 - ✅ **Lazy model loading** for memory efficiency
 - ✅ **Comprehensive API** for all use cases
+- ✅ **RAG-ready** vector storage with ChromaDB
 

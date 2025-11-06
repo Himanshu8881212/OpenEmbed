@@ -108,16 +108,21 @@ class SearchRequest(BaseModel):
 class SearchResult(BaseModel):
     """Single search result."""
     id: str
-    distance: float
+    similarity: float  # Similarity score (0-1, higher is more similar)
+    distance: float  # Distance metric from ChromaDB
+    modality: str  # Modality of the result
     metadata: Optional[Dict[str, Any]]
+    rank: int  # Rank in search results (1-based)
 
 
 class SearchResponse(BaseModel):
     """Response model for similarity search."""
     success: bool
+    query_modality: str  # Modality of the query
+    vector_store: str  # Name of the vector store searched
+    n_results: int  # Number of results returned
     results: List[SearchResult]
-    query_modality: ModalityType
-    total_results: int
+    filter_modality: Optional[str] = None  # Optional modality filter applied
 
 
 class HealthResponse(BaseModel):

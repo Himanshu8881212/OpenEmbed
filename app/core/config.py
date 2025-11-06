@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # Text formats - documents and plain text
     allowed_text_formats: List[str] = Field(
-        default=[".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
+        default=[".txt", ".json", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
         env="ALLOWED_TEXT_FORMATS"
     )
 
