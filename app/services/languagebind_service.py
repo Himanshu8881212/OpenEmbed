@@ -35,6 +35,7 @@ class LanguageBindService:
         self.modality_scale = {}  # Stores loaded logit scales
         self.modality_config = {}  # Stores loaded configs
         self.modality_transform = {}  # Stores loaded transforms
+        self.full_model = {}  # Stores full models (for text access)
         self._initialized = False
         self._base_initialized = False
 
@@ -160,11 +161,48 @@ class LanguageBindService:
 
             set_attn_implementation(model)
 
+            # For image modality, store full model BEFORE extracting vision_model
+            # (text encoder needs access to the full model and text projection)
+            if modality == 'image':
+                self.full_model['image'] = model.to(self.device)
+                self.full_model['image'].eval()
+                # Store text projection separately for text embeddings
+                self.modality_proj['text'] = model.text_projection.to(self.device)
+                self.modality_proj['text'].eval()
+
             # Store model components
             self.modality_encoder[modality] = model.vision_model.to(self.device)
             self.modality_proj[modality] = model.visual_projection.to(self.device)
             self.modality_scale[modality] = model.logit_scale.to(self.device)
             self.modality_config[modality] = model.config
+
+            # For audio modality, patch embeddings forward to handle non-square dimensions
+            if modality == 'audio':
+                vision_config = model.config.vision_config
+                if vision_config.num_mel_bins != 0 and vision_config.target_length != 0:
+                    # Store reference to embeddings
+                    embeddings = self.modality_encoder[modality].embeddings
+
+                    # Create a custom forward function that bypasses the dimension check
+                    import types
+
+                    def patched_forward(self, pixel_values, interpolate_pos_encoding=False):
+                        batch_size, _, height, width = pixel_values.shape
+                        # For audio, we expect [batch, 3, 112, 1036]
+                        # Skip the square image size check
+                        target_dtype = self.patch_embedding.weight.dtype
+                        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))
+                        patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
+
+                        class_embeds = self.class_embedding.expand(batch_size, 1, -1)
+                        embeddings_out = torch.cat([class_embeds, patch_embeds], dim=1)
+                        embeddings_out = embeddings_out + self.position_embedding(self.position_ids)
+
+                        return embeddings_out
+
+                    # Bind the method to the embeddings instance
+                    embeddings.forward = types.MethodType(patched_forward, embeddings)
+                    logger.debug(f"Patched audio embeddings forward method to handle non-square images [{vision_config.num_mel_bins}, {vision_config.target_length}]")
 
             # Initialize transform for this modality
             self.modality_transform[modality] = self.transform_dict[modality](model.config)
@@ -204,9 +242,12 @@ class LanguageBindService:
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                # Use image model's text encoder
-                text_features = self.modality_encoder['image'].text_model(**inputs)[1]
-                text_features = self.modality_proj['image'](text_features)
+                # Use full image model's text encoder
+                text_output = self.full_model['image'].text_model(**inputs)
+                # Extract pooled output (CLS token representation)
+                text_features = text_output[1] if isinstance(text_output, tuple) else text_output.pooler_output
+                # Use text projection (not visual projection)
+                text_features = self.modality_proj['text'](text_features)
                 text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
                 embedding = text_features[0].cpu().numpy()
 
