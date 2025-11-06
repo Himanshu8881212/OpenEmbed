@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
+.env.local
+
+# Data and cache (will be mounted as volumes)
+cache_dir/
+model_cache/
+chroma_db/
+uploads/
+logs/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

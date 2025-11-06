@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMBEd - Multi-Modal Embedding Application</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>EMBEd</h1>
+            <p class="subtitle">Multi-Modal Embedding Application</p>
+            <p class="description">Generate embeddings from text, images, videos, audio, depth maps, and thermal images using LanguageBind</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Vector Store Section -->
+            <section class="section">
+                <h2>Vector Stores</h2>
+                <div class="store-actions">
+                    <button id="btn-create-store" class="btn btn-primary">Create New Vector Store</button>
+                    <button id="btn-refresh-stores" class="btn btn-secondary">Refresh List</button>
+                </div>
+                <div id="stores-list" class="stores-list">
+                    <p class="loading">Loading vector stores...</p>
+                </div>
+            </section>
+
+            <!-- File Upload Section -->
+            <section class="section">
+                <h2>Upload File & Generate Embedding</h2>
+                <div class="upload-form">
+                    <div class="form-group">
+                        <label for="modality">Select Modality:</label>
+                        <select id="modality" class="form-control">
+                            <option value="">-- Select Modality --</option>
+                            <option value="text">Text</option>
+                            <option value="image">Image</option>
+                            <option value="video">Video</option>
+                            <option value="audio">Audio</option>
+                            <option value="depth">Depth Map</option>
+                            <option value="thermal">Thermal Image</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="text-input-group" style="display: none;">
+                        <label for="text-content">Text Content:</label>
+                        <textarea id="text-content" class="form-control" rows="4" placeholder="Enter your text here..."></textarea>
+                    </div>
+
+                    <div class="form-group" id="file-input-group" style="display: none;">
+                        <label for="file-input">Choose File:</label>
+                        <input type="file" id="file-input" class="form-control">
+                        <p class="file-info" id="file-info"></p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="vector-store-select">Vector Store:</label>
+                        <select id="vector-store-select" class="form-control">
+                            <option value="">-- Select Vector Store --</option>
+                        </select>
+                    </div>
+
+                    <button id="btn-generate-embedding" class="btn btn-primary" disabled>Generate & Store Embedding</button>
+                </div>
+
+                <div id="upload-status" class="status-message"></div>
+            </section>
+
+            <!-- Search Section -->
+            <section class="section">
+                <h2>Search Similar Embeddings</h2>
+                <div class="search-form">
+                    <div class="form-group">
+                        <label for="search-vector-store">Vector Store:</label>
+                        <select id="search-vector-store" class="form-control">
+                            <option value="">-- Select Vector Store --</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="search-modality">Query Modality:</label>
+                        <select id="search-modality" class="form-control">
+                            <option value="">-- Select Modality --</option>
+                            <option value="text">Text</option>
+                            <option value="image">Image</option>
+                            <option value="video">Video</option>
+                            <option value="audio">Audio</option>
+                            <option value="depth">Depth Map</option>
+                            <option value="thermal">Thermal Image</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="search-text-group" style="display: none;">
+                        <label for="search-text">Query Text:</label>
+                        <textarea id="search-text" class="form-control" rows="3" placeholder="Enter search query..."></textarea>
+                    </div>
+
+                    <div class="form-group" id="search-file-group" style="display: none;">
+                        <label for="search-file">Query File:</label>
+                        <input type="file" id="search-file" class="form-control">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="search-results-count">Number of Results:</label>
+                        <input type="number" id="search-results-count" class="form-control" value="10" min="1" max="100">
+                    </div>
+
+                    <button id="btn-search" class="btn btn-primary" disabled>Search</button>
+                </div>
+
+                <div id="search-results" class="search-results"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Modal for creating vector store -->
+    <div id="create-store-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Vector Store</h2>
+            <form id="create-store-form">
+                <div class="form-group">
+                    <label for="store-name">Name:</label>
+                    <input type="text" id="store-name" class="form-control" required>
+                    <small>Alphanumeric characters, hyphens, and underscores only</small>
+                </div>
+                <div class="form-group">
+                    <label for="store-description">Description (optional):</label>
+                    <textarea id="store-description" class="form-control" rows="3"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Create</button>
+                <button type="button" class="btn btn-secondary" id="btn-cancel-create">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <p>Processing...</p>
+    </div>
+
+    <footer>
+        <p>EMBEd v1.0.0 - Powered by LanguageBind & ChromaDB</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
