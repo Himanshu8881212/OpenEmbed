@@ -46,13 +46,31 @@ class LanguageBindService:
         try:
             logger.info("Initializing LanguageBind service...")
 
-            # Set device
-            if settings.device.startswith('cuda') and torch.cuda.is_available():
+            # Set device - support CPU, CUDA GPU, and Apple MPS
+            if settings.device == 'auto':
+                # Auto-detect best available device
+                if torch.cuda.is_available():
+                    self.device = torch.device('cuda')
+                    logger.info("✅ Auto-detected and using CUDA GPU")
+                elif torch.backends.mps.is_available():
+                    self.device = torch.device('mps')
+                    logger.info("✅ Auto-detected and using Apple MPS (Metal Performance Shaders)")
+                else:
+                    self.device = torch.device('cpu')
+                    logger.warning("⚠️  No GPU detected, using CPU (this will be slower)")
+            elif settings.device.startswith('cuda') and torch.cuda.is_available():
                 self.device = torch.device(settings.device)
-                logger.info(f"Using CUDA device: {self.device}")
-            else:
+                logger.info(f"✅ Using CUDA GPU: {self.device}")
+            elif settings.device == 'mps' and torch.backends.mps.is_available():
+                self.device = torch.device('mps')
+                logger.info("✅ Using Apple MPS (Metal Performance Shaders)")
+            elif settings.device == 'cpu':
                 self.device = torch.device('cpu')
-                logger.warning("CUDA not available, using CPU")
+                logger.info("✅ Using CPU as requested")
+            else:
+                # Fallback to CPU if requested device not available
+                self.device = torch.device('cpu')
+                logger.warning(f"⚠️  Requested device '{settings.device}' not available, falling back to CPU")
 
             # Import LanguageBind modules from app.languagebind
             try:

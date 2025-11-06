@@ -1,17 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EMBEd - Multi-Modal Embedding Application</title>
+    <title>openEmbed - Multi-Modal Embedding Application</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>EMBEd</h1>
+            <h1>openEmbed</h1>
             <p class="subtitle">Multi-Modal Embedding Application</p>
-            <p class="description">Generate embeddings from text, images, videos, audio, depth maps, and thermal images using LanguageBind</p>
+            <p class="description">Generate embeddings from text, images, videos, audio, depth maps, and thermal images
+                using LanguageBind</p>
         </header>
 
         <div class="main-content">
@@ -46,7 +49,8 @@
 
                     <div class="form-group" id="text-input-group" style="display: none;">
                         <label for="text-content">Text Content:</label>
-                        <textarea id="text-content" class="form-control" rows="4" placeholder="Enter your text here..."></textarea>
+                        <textarea id="text-content" class="form-control" rows="4"
+                            placeholder="Enter your text here..."></textarea>
                     </div>
 
                     <div class="form-group" id="file-input-group" style="display: none;">
@@ -62,7 +66,8 @@
                         </select>
                     </div>
 
-                    <button id="btn-generate-embedding" class="btn btn-primary" disabled>Generate & Store Embedding</button>
+                    <button id="btn-generate-embedding" class="btn btn-primary" disabled>Generate & Store
+                        Embedding</button>
                 </div>
 
                 <div id="upload-status" class="status-message"></div>
@@ -94,7 +99,8 @@
 
                     <div class="form-group" id="search-text-group" style="display: none;">
                         <label for="search-text">Query Text:</label>
-                        <textarea id="search-text" class="form-control" rows="3" placeholder="Enter search query..."></textarea>
+                        <textarea id="search-text" class="form-control" rows="3"
+                            placeholder="Enter search query..."></textarea>
                     </div>
 
                     <div class="form-group" id="search-file-group" style="display: none;">
@@ -104,7 +110,8 @@
 
                     <div class="form-group">
                         <label for="search-results-count">Number of Results:</label>
-                        <input type="number" id="search-results-count" class="form-control" value="10" min="1" max="100">
+                        <input type="number" id="search-results-count" class="form-control" value="10" min="1"
+                            max="100">
                     </div>
 
                     <button id="btn-search" class="btn btn-primary" disabled>Search</button>
@@ -143,9 +150,10 @@
     </div>
 
     <footer>
-        <p>EMBEd v1.0.0 - Powered by LanguageBind & ChromaDB</p>
+        <p>openEmbed v1.0.0 - Powered by LanguageBind & ChromaDB</p>
     </footer>
 
     <script src="/static/js/app.js"></script>
 </body>
+
 </html>

@@ -1,18 +1,18 @@
-# Core Dependencies (Official LanguageBind versions)
-torch==1.13.1
-torchvision==0.14.1
-torchaudio==0.13.1
+# Core Dependencies (Compatible versions for LanguageBind)
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
-# LanguageBind and ML (Official versions)
-transformers==4.30.2
-tokenizers==0.13.3
+# LanguageBind and ML (Compatible versions)
+transformers>=4.35.0
+tokenizers>=0.14.0
 huggingface-hub>=0.19.0
 timm>=0.9.0
 einops==0.6.1
 ftfy==6.1.1
 regex>=2023.0.0
-peft==0.4.0
-accelerate==0.20.3
+peft>=0.6.0
+accelerate>=0.20.3
 
 # Vector Store
 chromadb>=0.4.22

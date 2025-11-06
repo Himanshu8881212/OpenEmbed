@@ -135,6 +135,38 @@ async def get_vector_store(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/vector-stores/{name}/files")
+async def get_vector_store_files(name: str):
+    """Get all files/embeddings in a vector store."""
+    try:
+        if not chroma_service.collection_exists(name):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store '{name}' not found"
+            )
+
+        # Get all items from the collection
+        items = chroma_service.get_all_items(name)
+
+        files = []
+        for item_id, metadata in zip(items.get('ids', []), items.get('metadatas', [])):
+            files.append({
+                'id': item_id,
+                'filename': metadata.get('filename', 'unknown'),
+                'modality': metadata.get('modality', 'unknown'),
+                'timestamp': metadata.get('timestamp', datetime.utcnow().isoformat()),
+                'metadata': metadata
+            })
+
+        return files
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting vector store files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/vector-stores/{name}")
 async def delete_vector_store(name: str):
     """Delete a vector store."""
@@ -185,6 +217,102 @@ async def upload_file(
         raise
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/embed")
+async def embed_file(
+    file: UploadFile = File(...),
+    modality: str = Form(...),
+    vector_store: str = Form(...),
+    create_new: bool = Form(False)
+):
+    """Upload file and generate embedding in one step."""
+    try:
+        # Create vector store if requested
+        if create_new:
+            if not chroma_service.collection_exists(vector_store):
+                chroma_service.create_collection(
+                    name=vector_store,
+                    description=f"Vector store for {modality} embeddings"
+                )
+
+        # Check if vector store exists
+        if not chroma_service.collection_exists(vector_store):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
+            )
+
+        # Save file
+        modality_type = ModalityType(modality)
+        result = await file_handler.save_upload_file(file, modality_type)
+        if not result:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to save file. Check file format and size."
+            )
+
+        file_id, file_path = result
+
+        # Generate embedding
+        embedding = None
+        if modality == 'text':
+            # Read text content
+            content = file_path.read_text()
+            embedding = languagebind_service.generate_text_embedding(content)
+        elif modality == 'image':
+            embedding = languagebind_service.generate_image_embedding(str(file_path))
+        elif modality == 'video':
+            embedding = languagebind_service.generate_video_embedding(str(file_path))
+        elif modality == 'audio':
+            embedding = languagebind_service.generate_audio_embedding(str(file_path))
+        elif modality == 'depth':
+            embedding = languagebind_service.generate_depth_embedding(str(file_path))
+        elif modality == 'thermal':
+            embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+
+        if embedding is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate embedding"
+            )
+
+        # Store embedding
+        metadata = {
+            'modality': modality,
+            'filename': file.filename,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
+        embedding_id = chroma_service.add_embedding(
+            collection_name=vector_store,
+            embedding=embedding,
+            modality=modality,
+            metadata=metadata
+        )
+
+        if not embedding_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to store embedding"
+            )
+
+        return {
+            "success": True,
+            "message": "File embedded successfully",
+            "embedding_id": embedding_id,
+            "vector_store": vector_store,
+            "modality": modality,
+            "filename": file.filename
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error embedding file: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

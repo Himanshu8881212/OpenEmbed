@@ -1,4 +1,4 @@
-# EMBEd - Multi-Modal Embedding Application
+# openEmbed - Multi-Modal Embedding Application
 
 A professional, production-ready application for generating embeddings from multiple modalities (text, image, video, audio, depth maps, and thermal images) using LanguageBind and storing them in ChromaDB vector store.
 
@@ -15,7 +15,7 @@ A professional, production-ready application for generating embeddings from mult
 ## Architecture
 
 ```
-EMBEd/
+openEmbed/
 ├── app/
 │   ├── api/                 # API routes and endpoints
 │   ├── core/                # Configuration and logging
