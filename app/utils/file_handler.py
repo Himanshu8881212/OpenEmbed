@@ -35,12 +35,12 @@ class FileHandler:
         file_ext = Path(filename).suffix.lower()
 
         allowed_formats = {
+            ModalityType.TEXT: settings.allowed_text_formats,
             ModalityType.VIDEO: settings.allowed_video_formats,
             ModalityType.AUDIO: settings.allowed_audio_formats,
             ModalityType.IMAGE: settings.allowed_image_formats,
             ModalityType.DEPTH: settings.allowed_depth_formats,
             ModalityType.THERMAL: settings.allowed_thermal_formats,
-            ModalityType.TEXT: ['.txt']
         }
 
         allowed = allowed_formats.get(modality, [])

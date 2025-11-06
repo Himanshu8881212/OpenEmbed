@@ -35,24 +35,41 @@ class Settings(BaseSettings):
     max_file_size: int = Field(default=500_000_000, env="MAX_FILE_SIZE")  # 500MB
     upload_dir: str = Field(default="./uploads", env="UPLOAD_DIR")
 
+    # Text formats - documents and plain text
+    allowed_text_formats: List[str] = Field(
+        default=[".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
+        env="ALLOWED_TEXT_FORMATS"
+    )
+
+    # Video formats - common video containers
     allowed_video_formats: List[str] = Field(
-        default=[".mp4", ".avi", ".mov", ".mkv"],
+        default=[".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg"],
         env="ALLOWED_VIDEO_FORMATS"
     )
+
+    # Audio formats - common audio formats
     allowed_audio_formats: List[str] = Field(
-        default=[".wav", ".mp3", ".flac", ".m4a"],
+        default=[".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus"],
         env="ALLOWED_AUDIO_FORMATS"
     )
+
+    # Image formats - standard image formats
     allowed_image_formats: List[str] = Field(
-        default=[".jpg", ".jpeg", ".png", ".bmp"],
+        default=[".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif", ".webp", ".svg"],
         env="ALLOWED_IMAGE_FORMATS"
     )
+
+    # Depth map formats - depth data formats
+    # .png is supported but requires explicit modality specification (defaults to image)
     allowed_depth_formats: List[str] = Field(
-        default=[".png", ".npy"],
+        default=[".png", ".npy", ".npz", ".exr", ".pfm"],
         env="ALLOWED_DEPTH_FORMATS"
     )
+
+    # Thermal image formats - thermal imaging formats
+    # .jpg/.jpeg/.png are supported but require explicit modality specification (default to image)
     allowed_thermal_formats: List[str] = Field(
-        default=[".jpg", ".jpeg", ".png"],
+        default=[".jpg", ".jpeg", ".png", ".tiff", ".tif"],
         env="ALLOWED_THERMAL_FORMATS"
     )
 
@@ -72,7 +89,7 @@ class Settings(BaseSettings):
 
         @classmethod
         def parse_env_var(cls, field_name: str, raw_val: str):
-            if field_name in ['allowed_video_formats', 'allowed_audio_formats',
+            if field_name in ['allowed_text_formats', 'allowed_video_formats', 'allowed_audio_formats',
                              'allowed_image_formats', 'allowed_depth_formats',
                              'allowed_thermal_formats', 'cors_origins']:
                 return [x.strip() for x in raw_val.split(',')]
