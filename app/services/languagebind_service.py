@@ -15,14 +15,13 @@ class LanguageBindService:
     """
     Service class for LanguageBind multi-modal embeddings.
     Handles model initialization and embedding generation for all 6 modalities.
+    Uses lazy loading - models are only loaded when first requested.
     """
 
     def __init__(self):
         """Initialize the LanguageBind service."""
         self.device = None
-        self.model = None
         self.tokenizer = None
-        self.modality_transform = None
         self.clip_type = {
             'video': 'LanguageBind_Video_FT',
             'audio': 'LanguageBind_Audio_FT',
@@ -30,21 +29,29 @@ class LanguageBindService:
             'image': 'LanguageBind_Image',
             'depth': 'LanguageBind_Depth',
         }
+        # Lazy loading: models loaded on-demand
+        self.modality_encoder = {}  # Stores loaded vision encoders
+        self.modality_proj = {}  # Stores loaded projection layers
+        self.modality_scale = {}  # Stores loaded logit scales
+        self.modality_config = {}  # Stores loaded configs
+        self.modality_transform = {}  # Stores loaded transforms
         self._initialized = False
+        self._base_initialized = False
 
     def initialize(self) -> bool:
         """
-        Initialize LanguageBind models and transformations.
+        Initialize base LanguageBind service (device and imports only).
+        Models are loaded lazily when first requested.
 
         Returns:
             bool: True if initialization successful, False otherwise
         """
-        if self._initialized:
-            logger.info("LanguageBind already initialized")
+        if self._base_initialized:
+            logger.info("LanguageBind base already initialized")
             return True
 
         try:
-            logger.info("Initializing LanguageBind service...")
+            logger.info("Initializing LanguageBind service (lazy loading mode)...")
 
             # Set device - support CPU, CUDA GPU, and Apple MPS
             if settings.device == 'auto':
@@ -74,29 +81,16 @@ class LanguageBindService:
 
             # Import LanguageBind modules from app.languagebind
             try:
-                from app.languagebind import LanguageBind, to_device, transform_dict, LanguageBindImageTokenizer
-                logger.info("Loaded official LanguageBind package")
+                from app.languagebind import to_device, transform_dict, LanguageBindImageTokenizer
+                logger.info("Loaded LanguageBind package")
             except ImportError as e:
                 logger.error(f"Failed to import LanguageBind: {e}")
                 raise
 
             self.to_device = to_device
+            self.transform_dict = transform_dict
 
-            # Initialize model - this will download all 6 modality models from Hugging Face
-            logger.info("Loading LanguageBind models (downloading from Hugging Face)...")
-            logger.info("📥 Downloading all 6 modality models:")
-            for modality, model_name in self.clip_type.items():
-                logger.info(f"  - {modality}: LanguageBind/{model_name}")
-
-            self.model = LanguageBind(
-                clip_type=self.clip_type,
-                cache_dir=settings.cache_dir
-            )
-            self.model = self.model.to(self.device)
-            self.model.eval()
-            logger.info("✅ All 6 modality models loaded successfully!")
-
-            # Initialize tokenizer
+            # Initialize tokenizer (shared across all modalities)
             logger.info("Loading tokenizer...")
             pretrained_ckpt = 'LanguageBind/LanguageBind_Image'
             self.tokenizer = LanguageBindImageTokenizer.from_pretrained(
@@ -105,18 +99,11 @@ class LanguageBindService:
             )
             logger.info("✅ Tokenizer loaded successfully")
 
-            # Initialize modality transforms
-            logger.info("Setting up modality transforms...")
-            self.modality_transform = {
-                c: transform_dict[c](self.model.modality_config[c])
-                for c in self.clip_type.keys()
-            }
-            logger.info("✅ Transforms initialized successfully")
-
+            self._base_initialized = True
             self._initialized = True
             logger.info("=" * 60)
-            logger.info("✅ LanguageBind service initialization complete!")
-            logger.info("✅ All 6 modalities ready: text, image, video, audio, depth, thermal")
+            logger.info("✅ LanguageBind service initialized (lazy loading mode)")
+            logger.info("✅ Models will be loaded on-demand when first requested")
             logger.info("=" * 60)
             return True
 
@@ -124,13 +111,86 @@ class LanguageBindService:
             logger.error(f"Failed to initialize LanguageBind: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            self._base_initialized = False
             self._initialized = False
             return False
 
+    def _load_modality_model(self, modality: str) -> bool:
+        """
+        Load a specific modality model on-demand.
+
+        Args:
+            modality: Modality to load (image, video, audio, depth, thermal)
+
+        Returns:
+            bool: True if loaded successfully, False otherwise
+        """
+        if modality in self.modality_encoder:
+            logger.debug(f"Model for {modality} already loaded")
+            return True
+
+        if not self._base_initialized:
+            logger.error("Base service not initialized. Call initialize() first.")
+            return False
+
+        try:
+            logger.info(f"📥 Loading {modality} model on-demand...")
+
+            # Import model classes
+            from app.languagebind import model_dict
+
+            # Get model name
+            model_name = self.clip_type[modality]
+            pretrained_ckpt = f'LanguageBind/{model_name}'
+
+            # Load model
+            model = model_dict[modality].from_pretrained(
+                pretrained_ckpt,
+                cache_dir=settings.cache_dir,
+                attn_implementation="eager"
+            )
+
+            # Recursively set _attn_implementation on all configs to avoid KeyError
+            def set_attn_implementation(module):
+                """Recursively set _attn_implementation on all submodules with config"""
+                if hasattr(module, 'config'):
+                    module.config._attn_implementation = "eager"
+                for child in module.children():
+                    set_attn_implementation(child)
+
+            set_attn_implementation(model)
+
+            # Store model components
+            self.modality_encoder[modality] = model.vision_model.to(self.device)
+            self.modality_proj[modality] = model.visual_projection.to(self.device)
+            self.modality_scale[modality] = model.logit_scale.to(self.device)
+            self.modality_config[modality] = model.config
+
+            # Initialize transform for this modality
+            self.modality_transform[modality] = self.transform_dict[modality](model.config)
+
+            # Set to eval mode
+            self.modality_encoder[modality].eval()
+            self.modality_proj[modality].eval()
+
+            logger.info(f"✅ {modality.capitalize()} model loaded successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load {modality} model: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     def generate_text_embedding(self, text: str) -> Optional[np.ndarray]:
-        """Generate embedding for text input."""
+        """Generate embedding for text input (uses image model's text encoder)."""
         if not self._initialized:
             logger.error("Service not initialized")
+            return None
+
+        # Load image model if not already loaded (text uses image model's encoder)
+        if not self._load_modality_model('image'):
+            logger.error("Failed to load image model for text embedding")
             return None
 
         try:
@@ -144,8 +204,11 @@ class LanguageBindService:
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'language': inputs})
-                embedding = embeddings['language'][0].cpu().numpy()
+                # Use image model's text encoder
+                text_features = self.modality_encoder['image'].text_model(**inputs)[1]
+                text_features = self.modality_proj['image'](text_features)
+                text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = text_features[0].cpu().numpy()
 
             logger.info(f"Generated text embedding with shape {embedding.shape}")
             return embedding
@@ -162,14 +225,25 @@ class LanguageBindService:
             logger.error("Service not initialized")
             return None
 
+        # Load image model if not already loaded
+        if not self._load_modality_model('image'):
+            logger.error("Failed to load image model")
+            return None
+
         try:
             image_path = str(image_path)
             inputs = self.modality_transform['image']([image_path])
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'image': inputs})
-                embedding = embeddings['image'][0].cpu().numpy()
+                # Extract pixel_values from inputs dict
+                pixel_values = inputs['pixel_values'] if isinstance(inputs, dict) else inputs
+                encoder_output = self.modality_encoder['image'](pixel_values)
+                # Extract pooled output (CLS token representation)
+                image_features = encoder_output[1] if isinstance(encoder_output, tuple) else encoder_output.pooler_output
+                image_features = self.modality_proj['image'](image_features)
+                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = image_features[0].cpu().numpy()
 
             logger.info(f"Generated image embedding with shape {embedding.shape}")
             return embedding
@@ -186,14 +260,25 @@ class LanguageBindService:
             logger.error("Service not initialized")
             return None
 
+        # Load video model if not already loaded
+        if not self._load_modality_model('video'):
+            logger.error("Failed to load video model")
+            return None
+
         try:
             video_path = str(video_path)
             inputs = self.modality_transform['video']([video_path])
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'video': inputs})
-                embedding = embeddings['video'][0].cpu().numpy()
+                # Extract pixel_values from inputs dict
+                pixel_values = inputs['pixel_values'] if isinstance(inputs, dict) else inputs
+                encoder_output = self.modality_encoder['video'](pixel_values)
+                # Extract pooled output (CLS token representation)
+                video_features = encoder_output[1] if isinstance(encoder_output, tuple) else encoder_output.pooler_output
+                video_features = self.modality_proj['video'](video_features)
+                video_features = video_features / video_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = video_features[0].cpu().numpy()
 
             logger.info(f"Generated video embedding with shape {embedding.shape}")
             return embedding
@@ -210,14 +295,25 @@ class LanguageBindService:
             logger.error("Service not initialized")
             return None
 
+        # Load audio model if not already loaded
+        if not self._load_modality_model('audio'):
+            logger.error("Failed to load audio model")
+            return None
+
         try:
             audio_path = str(audio_path)
             inputs = self.modality_transform['audio']([audio_path])
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'audio': inputs})
-                embedding = embeddings['audio'][0].cpu().numpy()
+                # Extract pixel_values from inputs dict
+                pixel_values = inputs['pixel_values'] if isinstance(inputs, dict) else inputs
+                encoder_output = self.modality_encoder['audio'](pixel_values)
+                # Extract pooled output (CLS token representation)
+                audio_features = encoder_output[1] if isinstance(encoder_output, tuple) else encoder_output.pooler_output
+                audio_features = self.modality_proj['audio'](audio_features)
+                audio_features = audio_features / audio_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = audio_features[0].cpu().numpy()
 
             logger.info(f"Generated audio embedding with shape {embedding.shape}")
             return embedding
@@ -234,14 +330,25 @@ class LanguageBindService:
             logger.error("Service not initialized")
             return None
 
+        # Load depth model if not already loaded
+        if not self._load_modality_model('depth'):
+            logger.error("Failed to load depth model")
+            return None
+
         try:
             depth_path = str(depth_path)
             inputs = self.modality_transform['depth']([depth_path])
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'depth': inputs})
-                embedding = embeddings['depth'][0].cpu().numpy()
+                # Extract pixel_values from inputs dict
+                pixel_values = inputs['pixel_values'] if isinstance(inputs, dict) else inputs
+                encoder_output = self.modality_encoder['depth'](pixel_values)
+                # Extract pooled output (CLS token representation)
+                depth_features = encoder_output[1] if isinstance(encoder_output, tuple) else encoder_output.pooler_output
+                depth_features = self.modality_proj['depth'](depth_features)
+                depth_features = depth_features / depth_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = depth_features[0].cpu().numpy()
 
             logger.info(f"Generated depth embedding with shape {embedding.shape}")
             return embedding
@@ -258,14 +365,25 @@ class LanguageBindService:
             logger.error("Service not initialized")
             return None
 
+        # Load thermal model if not already loaded
+        if not self._load_modality_model('thermal'):
+            logger.error("Failed to load thermal model")
+            return None
+
         try:
             thermal_path = str(thermal_path)
             inputs = self.modality_transform['thermal']([thermal_path])
             inputs = self.to_device(inputs, self.device)
 
             with torch.no_grad():
-                embeddings = self.model({'thermal': inputs})
-                embedding = embeddings['thermal'][0].cpu().numpy()
+                # Extract pixel_values from inputs dict
+                pixel_values = inputs['pixel_values'] if isinstance(inputs, dict) else inputs
+                encoder_output = self.modality_encoder['thermal'](pixel_values)
+                # Extract pooled output (CLS token representation)
+                thermal_features = encoder_output[1] if isinstance(encoder_output, tuple) else encoder_output.pooler_output
+                thermal_features = self.modality_proj['thermal'](thermal_features)
+                thermal_features = thermal_features / thermal_features.norm(p=2, dim=-1, keepdim=True)
+                embedding = thermal_features[0].cpu().numpy()
 
             logger.info(f"Generated thermal embedding with shape {embedding.shape}")
             return embedding

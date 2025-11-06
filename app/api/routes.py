@@ -298,13 +298,18 @@ async def embed_file(
                 detail="Failed to store embedding"
             )
 
+        # Create embedding preview (first 10 values)
+        embedding_preview = embedding[:10].tolist() if len(embedding) >= 10 else embedding.tolist()
+
         return {
             "success": True,
             "message": "File embedded successfully",
             "embedding_id": embedding_id,
             "vector_store": vector_store,
             "modality": modality,
-            "filename": file.filename
+            "filename": file.filename,
+            "embedding_preview": embedding_preview,
+            "embedding_shape": len(embedding)
         }
 
     except HTTPException:

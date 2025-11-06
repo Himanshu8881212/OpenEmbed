@@ -45,6 +45,7 @@ const modalityIcons: { [key: string]: React.ReactElement } = {
 };
 
 const modalityExtensions: { [key: string]: string[] } = {
+  text: ['.txt'],
   image: ['.jpg', '.jpeg', '.png', '.bmp'],
   video: ['.mp4', '.avi', '.mov', '.mkv'],
   audio: ['.wav', '.mp3', '.flac', '.m4a'],

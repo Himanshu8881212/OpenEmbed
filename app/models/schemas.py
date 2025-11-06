@@ -69,6 +69,8 @@ class EmbeddingResponse(BaseModel):
     embedding_id: Optional[str] = None
     vector_store_name: str
     modality: ModalityType
+    embedding_preview: Optional[List[float]] = Field(None, description="First 10 values of embedding for verification")
+    embedding_shape: Optional[int] = Field(None, description="Dimension of the embedding vector")
     metadata: Optional[Dict[str, Any]] = None
 
 

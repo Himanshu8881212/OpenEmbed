@@ -1,0 +1,1 @@
+This is a sample text document for testing the text embedding modality in openEmbed. Multi-modal embeddings allow us to search across different types of content using semantic similarity.
