@@ -25,16 +25,14 @@ ENV DEVICE=cpu
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies with specific versions for LanguageBind
-# Install PyTorch first with CPU builds from PyTorch index
+# Install Python dependencies with OFFICIAL LanguageBind versions
+# CRITICAL: PyTorch 1.13.1 + transformers 4.30.2 are REQUIRED for LanguageBind
 RUN pip install --upgrade pip && \
-    pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+    pip install torch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 --index-url https://download.pytorch.org/whl/cpu
 
-# Install all other dependencies from requirements.txt (includes numpy<2.0.0 and transformers>=4.35.0)
+# Install all other dependencies from requirements.txt
+# This includes transformers==4.30.2, tokenizers==0.13.3, numpy==1.23.0 (official versions)
 RUN pip install -r requirements.txt
-
-# Install additional packages not in requirements.txt
-RUN pip install peft==0.4.0
 
 # Copy application code (including app/languagebind and app/open_clip)
 COPY . .
