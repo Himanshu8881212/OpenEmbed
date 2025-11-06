@@ -1,15 +1,18 @@
-# Core Dependencies
-torch==2.1.0
-torchvision==0.16.0
-torchaudio==2.1.0
+# Core Dependencies (Compatible versions for LanguageBind)
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
-# LanguageBind and ML
+# LanguageBind and ML (Compatible versions)
 transformers>=4.35.0
+tokenizers>=0.14.0
 huggingface-hub>=0.19.0
 timm>=0.9.0
-einops>=0.7.0
-ftfy>=6.1.0
+einops==0.6.1
+ftfy==6.1.1
 regex>=2023.0.0
+peft>=0.6.0
+accelerate>=0.20.3
 
 # Vector Store
 chromadb>=0.4.22
@@ -22,14 +25,16 @@ python-multipart>=0.0.6
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
-# File Processing
+# File Processing (Official LanguageBind versions)
 Pillow>=10.0.0
-opencv-python>=4.8.0
+opencv-python==4.7.0.72
 moviepy>=1.0.3
 librosa>=0.10.0
 soundfile>=0.12.0
-numpy>=1.24.0
-scipy>=1.11.0
+numpy==1.23.0
+scipy==1.10.1
+scikit-learn==1.3.0
+# decord==0.6.0  # Commented out - will be built from source in Dockerfile for ARM64 compatibility
 
 # Utilities
 python-dotenv>=1.0.0

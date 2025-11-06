@@ -1,18 +1,35 @@
 import cv2
-import decord
 import numpy as np
 import torch
 from PIL import Image
-from decord import VideoReader, cpu
 from torchvision import transforms
 from transformers import ProcessorMixin, BatchEncoding
 from transformers.image_processing_utils import BatchFeature
-from pytorchvideo.data.encoded_video import EncodedVideo
 from torchvision.transforms import Compose, Lambda, ToTensor
 from torchvision.transforms._transforms_video import NormalizeVideo, RandomCropVideo, RandomHorizontalFlipVideo, CenterCropVideo
-from pytorchvideo.transforms import ApplyTransformToKey, ShortSideScale, UniformTemporalSubsample
 
-decord.bridge.set_bridge('torch')
+# Try to import decord, but make it optional
+try:
+    import decord
+    from decord import VideoReader, cpu
+    decord.bridge.set_bridge('torch')
+    DECORD_AVAILABLE = True
+except ImportError:
+    DECORD_AVAILABLE = False
+    VideoReader = None
+    cpu = None
+
+# Try to import pytorchvideo, but make it optional
+try:
+    from pytorchvideo.data.encoded_video import EncodedVideo
+    from pytorchvideo.transforms import ApplyTransformToKey, ShortSideScale, UniformTemporalSubsample
+    PYTORCHVIDEO_AVAILABLE = True
+except ImportError:
+    PYTORCHVIDEO_AVAILABLE = False
+    EncodedVideo = None
+    ApplyTransformToKey = None
+    ShortSideScale = None
+    UniformTemporalSubsample = None
 
 OPENAI_DATASET_MEAN = (0.48145466, 0.4578275, 0.40821073)
 OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -24,7 +41,18 @@ def make_list_of_images(x):
 
 def get_video_transform(config):
     config = config.vision_config
-    if config.video_decode_backend == 'pytorchvideo':
+    # Default to opencv if backend not available
+    backend = config.video_decode_backend
+    if backend == 'pytorchvideo' and not PYTORCHVIDEO_AVAILABLE:
+        print("Warning: pytorchvideo not available, falling back to opencv")
+        backend = 'opencv'
+    if backend == 'decord' and not DECORD_AVAILABLE:
+        print("Warning: decord not available, falling back to opencv")
+        backend = 'opencv'
+
+    if backend == 'pytorchvideo':
+        if not PYTORCHVIDEO_AVAILABLE:
+            raise ImportError("pytorchvideo is required but not installed")
         transform = ApplyTransformToKey(
             key="video",
             transform=Compose(
@@ -39,8 +67,9 @@ def get_video_transform(config):
             ),
         )
 
-    elif config.video_decode_backend == 'decord':
-
+    elif backend == 'decord':
+        if not DECORD_AVAILABLE:
+            raise ImportError("decord is required but not installed")
         transform = Compose(
             [
                 # UniformTemporalSubsample(num_frames),
@@ -52,7 +81,7 @@ def get_video_transform(config):
             ]
         )
 
-    elif config.video_decode_backend == 'opencv':
+    elif backend == 'opencv':
         transform = Compose(
             [
                 # UniformTemporalSubsample(num_frames),
@@ -76,7 +105,17 @@ def load_and_transform_video(
         clip_end_sec=None,
         num_frames=8,
 ):
+    # Default to opencv if backend not available
+    if video_decode_backend == 'pytorchvideo' and not PYTORCHVIDEO_AVAILABLE:
+        print("Warning: pytorchvideo not available, falling back to opencv")
+        video_decode_backend = 'opencv'
+    if video_decode_backend == 'decord' and not DECORD_AVAILABLE:
+        print("Warning: decord not available, falling back to opencv")
+        video_decode_backend = 'opencv'
+
     if video_decode_backend == 'pytorchvideo':
+        if not PYTORCHVIDEO_AVAILABLE:
+            raise ImportError("pytorchvideo is required but not installed")
         #  decord pyav
         video = EncodedVideo.from_path(video_path, decoder="decord", decode_audio=False)
         duration = video.duration
@@ -86,6 +125,8 @@ def load_and_transform_video(
         video_outputs = transform(video_data)
 
     elif video_decode_backend == 'decord':
+        if not DECORD_AVAILABLE:
+            raise ImportError("decord is required but not installed")
         decord.bridge.set_bridge('torch')
         decord_vr = VideoReader(video_path, ctx=cpu(0))
         duration = len(decord_vr)

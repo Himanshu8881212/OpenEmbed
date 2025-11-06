@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Model Configuration
     cache_dir: str = Field(default="./cache_dir", env="CACHE_DIR")
     model_cache_dir: str = Field(default="./model_cache", env="MODEL_CACHE_DIR")
-    device: str = Field(default="cuda:0", env="DEVICE")
+    device: str = Field(default="auto", env="DEVICE")  # auto, cpu, cuda, cuda:0, mps
 
     # ChromaDB
     chroma_persist_dir: str = Field(default="./chroma_db", env="CHROMA_PERSIST_DIR")
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = Field(default="change-me-in-production", env="SECRET_KEY")
     cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
+        default=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"],
         env="CORS_ORIGINS"
     )
 

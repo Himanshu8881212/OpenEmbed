@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     Initialize services on startup and cleanup on shutdown.
     """
     # Startup
-    logger.info("Starting EMBEd application...")
+    logger.info("Starting openEmbed application...")
 
     # Create necessary directories
     settings.create_directories()
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="EMBEd - Multi-Modal Embedding Application",
+    title="openEmbed - Multi-Modal Embedding Application",
     description="A professional application for generating embeddings from multiple modalities using LanguageBind",
     version="1.0.0",
     lifespan=lifespan

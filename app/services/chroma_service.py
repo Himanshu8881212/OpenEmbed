@@ -314,6 +314,37 @@ class ChromaService:
             logger.error(f"Failed to get info for collection {name}: {e}")
             return None
 
+    def get_all_items(self, collection_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get all items from a collection.
+
+        Args:
+            collection_name: Name of the collection
+
+        Returns:
+            Dictionary with all items or None if failed
+        """
+        if not self._initialized:
+            logger.error("Service not initialized")
+            return None
+
+        try:
+            collection = self.get_collection(collection_name)
+            if collection is None:
+                logger.error(f"Collection {collection_name} not found")
+                return None
+
+            # Get all items
+            results = collection.get(
+                include=['metadatas']
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to get items from {collection_name}: {e}")
+            return None
+
     def collection_exists(self, name: str) -> bool:
         """
         Check if a collection exists.
