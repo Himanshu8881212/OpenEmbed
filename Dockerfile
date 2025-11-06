@@ -28,7 +28,6 @@ COPY requirements.txt .
 # Install Python dependencies with specific versions for LanguageBind
 RUN pip install --upgrade pip && \
     pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install transformers==4.30.2 tokenizers==0.13.3 && \
     pip install "numpy<2.0.0" && \
     pip install peft==0.4.0 && \
     pip install einops opencv-python scipy scikit-learn SoundFile ftfy && \

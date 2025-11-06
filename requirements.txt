@@ -1,7 +1,7 @@
 # Core Dependencies
-torch==2.1.0
-torchvision==0.16.0
-torchaudio==2.1.0
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
 
 # LanguageBind and ML
 transformers>=4.35.0
