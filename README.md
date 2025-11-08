@@ -1,433 +1,189 @@
-# EMBEd (OpenEmbed)
+# EMBEd - Self-Hosted Multi-Modal Embeddings
 
-**Open-source multi-modal embedding service for RAG applications**
+**Turn your documents, images, videos, and audio into searchable embeddings. Locally.**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18+-blue.svg)](https://reactjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-**EMBEd** is an open-source **Embedding-as-a-Service** platform that generates and manages embeddings for RAG (Retrieval Augmented Generation) applications. Create vector stores with text-only or multi-modal content, and let EMBEd handle all the embedding generation using Meta's ImageBind model.
-
-## 🎯 What is EMBEd?
-
-EMBEd is a **managed embedding service** that:
-- 📦 **Creates vector stores** for your RAG applications
-- 🤖 **Generates embeddings** using ImageBind (1024-dimensional)
-- 💾 **Stores embeddings** in ChromaDB with persistence
-- 🔍 **Provides search API** for retrieval in RAG workflows
-- 🎨 **Supports 7 modalities** - Text, Image, Video, Audio, Depth, Thermal, IMU
-
-**Perfect for:**
-- ✅ Text-only RAG applications (like ChatGPT with your documents)
-- ✅ Multi-modal RAG (search across text, images, videos, audio)
-- ✅ Cross-modal search (find images using text descriptions)
-- ✅ Content organization and similarity search
-
-## ✨ Key Features
-
-- 🎯 **Text-Only RAG** - Upload documents, get embeddings, use in your RAG app
-- 🌈 **Multi-Modal RAG** - Mix text, images, videos, audio in same vector store
-- 🔍 **Cross-Modal Search** - Find images using text, or text using audio
-- 🚀 **Production Ready** - FastAPI backend + React frontend
-- 💾 **Persistent Storage** - ChromaDB vector database
-- 📦 **Python SDK** - Easy integration with your applications
-- 🔌 **RESTful API** - Standard HTTP endpoints
-- 🎨 **Modern UI** - Clean, professional interface
-- 🐳 **Docker Ready** - One-command deployment
-
-## 🚀 Quick Start
-
-### 🐳 Docker Installation (Recommended)
-
-**Prerequisites**: Docker Desktop ([Download](https://www.docker.com/products/docker-desktop))
-
-```bash
-# Clone repository
-git clone https://github.com/Himanshu8881212/EMBEd.git
-cd EMBEd
-
-# Start with Docker Compose
-docker-compose up -d
-
-# Wait ~30 seconds for model to load, then access:
-# http://localhost:8000
-```
-
-**That's it!** 🎉
-
-**Useful Commands**:
-```bash
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-
-# Rebuild after code changes
-docker-compose down -v
-docker rmi embed-embed
-docker-compose build
-docker-compose up -d
-```
 
 ---
 
-### 💻 Manual Installation (Advanced)
+## What is EMBEd?
 
-**Prerequisites**:
+EMBEd is a **self-hosted embedding service** that helps you build RAG (Retrieval Augmented Generation) applications. Upload your files through a web interface, search them from Python.
+
+**Think Pinecone or Weaviate, but:**
+- ✅ Self-hosted (runs on your machine)
+- ✅ Multi-modal (text, images, videos, audio)
+- ✅ Open source (MIT license)
+- ✅ Free (no API costs)
+
+---
+
+## Quick Start
+
+**Requirements:** Docker Desktop ([download](https://www.docker.com/products/docker-desktop))
+
+```bash
+# Clone and start
+git clone https://github.com/Himanshu8881212/EMBEd.git
+cd EMBEd
+docker-compose up -d
+
+# Wait 30 seconds for model to load, then open:
+# http://localhost:8000
+```
+
+That's it! 🎉
+
+---
+
+## How It Works
+
+### 1. Upload via Web UI
+Open http://localhost:8000 and upload your files:
+- 📄 Documents (.pdf, .txt, .docx)
+- 🖼️ Images (.jpg, .png)
+- 🎥 Videos (.mp4, .mov)
+- 🔊 Audio (.mp3, .wav)
+
+EMBEd automatically creates embeddings and stores them.
+
+### 2. Query from Python
+
+```python
+from openembed import OpenEmbedClient
+
+client = OpenEmbedClient("http://localhost:8000")
+results = client.search("my_store", "your search query")
+
+# Use results in your RAG app, chatbot, search engine, etc.
+```
+
+### 3. Use with Any LLM
+
+```python
+from openai import OpenAI
+
+# Get context from EMBEd
+results = client.search("my_docs", "What's our vacation policy?")
+context = "\n".join([r['metadata'].get('text_content', '') for r in results])
+
+# Send to LLM
+openai = OpenAI()
+response = openai.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "Answer using the context provided."},
+        {"role": "user", "content": f"Context: {context}\n\nQuestion: What's our vacation policy?"}
+    ]
+)
+```
+
+**Works with:** OpenAI, Claude, Llama, Mistral, or any LLM.
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **7 Modalities** | Text, images, videos, audio, depth maps, thermal, IMU sensors |
+| **Cross-Modal Search** | Find images using text, videos using audio, etc. |
+| **Persistent Storage** | ChromaDB vector database with disk persistence |
+| **Web Interface** | Upload and manage files visually |
+| **Python SDK** | Simple client library for integration |
+| **Docker Ready** | One-command deployment |
+| **Self-Hosted** | Your data stays on your machine |
+
+---
+
+## Use Cases
+
+### 📚 Document Q&A (RAG)
+Upload your company docs, policies, manuals → Ask questions in natural language → Get accurate answers with sources.
+
+### 🔍 Semantic Search
+Search across all your content (documents, images, videos) using natural language. Finds meaning, not just keywords.
+
+### 🎨 Multi-Modal Search
+- Upload product images → Search "red running shoes"
+- Upload videos → Search "sunset over ocean"
+- Upload audio → Find similar music or spoken content
+
+### 🤖 Chatbot Knowledge Base
+Feed your chatbot with relevant context from your documents, making it knowledgeable about your specific domain.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Web UI (localhost:8000)                        │
+│  Upload files → Auto-embed → Store in ChromaDB │
+└─────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  Python SDK                                      │
+│  Search embeddings → Get relevant results       │
+└─────────────────────────────────────────────────┘
+                      ↓
+┌─────────────────────────────────────────────────┐
+│  Your Application                                │
+│  RAG, Chatbot, Search, Analysis, etc.           │
+└─────────────────────────────────────────────────┘
+```
+
+**Embedding Model:** Meta's ImageBind (1024 dimensions, unified multi-modal space)
+**Vector DB:** ChromaDB with persistent storage
+**Backend:** FastAPI + Python
+**Frontend:** React + TypeScript + Material-UI
+
+---
+
+## Manual Installation
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
+
+**Requirements:**
 - Python 3.9+
 - Node.js 16+
 - 8GB+ RAM
-- (Optional) CUDA-capable GPU
 
 ```bash
-# Clone repository
-git clone https://github.com/Himanshu8881212/EMBEd.git
-cd EMBEd
-
-# Backend setup
+# Backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Frontend setup
+# Frontend
 cd frontend
 npm install
 cd ..
-```
 
-### Running (Manual)
-
-```bash
-# Terminal 1: Start backend
-source venv/bin/activate
+# Run (Terminal 1: Backend)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# Terminal 2: Start frontend
-cd frontend
-npm start
+# Run (Terminal 2: Frontend)
+cd frontend && npm start
 ```
 
-**Access**:
+Access:
 - Web UI: http://localhost:3000
 - API Docs: http://localhost:8000/docs
-- SDK Examples: `sdk/examples/`
 
-## 📦 Python SDK
+</details>
 
-**Recommended Workflow:**
-1. Upload documents via Web UI (http://localhost:8000)
-2. Query from Python using the SDK
+---
 
-```python
-from openembed import OpenEmbedClient
+## Configuration
 
-# Initialize client
-client = OpenEmbedClient("http://localhost:8000")
-
-# Search your embedded documents (uploaded via Web UI)
-results = client.search("my_store", "beautiful sunset images")
-for r in results:
-    print(f"{r['metadata']['filename']}: {r['similarity']:.1%}")
-```
-
-**Advanced:** Programmatic upload (if you prefer)
-```python
-# Upload single file
-client.upload("my_store", "image.jpg", "image")
-
-# Batch upload with auto-detection
-client.upload_batch("my_store", ["file1.jpg", "file2.mp3", "file3.txt"])
-```
-
-**Full Documentation**: [sdk/python/README.md](sdk/python/README.md)
-
-## 🎯 Supported Modalities
-
-| Modality | Extensions | Use Cases |
-|----------|-----------|-----------|
-| **Text** | .txt, .md, .json, .csv | Documents, articles, data |
-| **Image** | .jpg, .png, .gif, .webp | Photos, graphics, diagrams |
-| **Video** | .mp4, .avi, .mov, .mkv | Videos, animations |
-| **Audio** | .wav, .mp3, .flac, .m4a | Music, speech, sounds |
-| **Depth** | .png, .jpg, .tiff | Depth maps, 3D data |
-| **Thermal** | .png, .jpg, .tiff | Thermal imaging |
-| **IMU** | .csv, .json, .txt | Motion sensor data |
-
-## 🔌 API Endpoints
-
-### Search
-```bash
-# Text search
-POST /api/search-by-id
-{
-  "vector_store": "my_store",
-  "text": "sunset images",
-  "n_results": 10
-}
-
-# File search
-POST /api/search
-FormData: file, vector_store, n_results
-```
-
-### Upload
-```bash
-# Single file
-POST /api/embed
-FormData: file, vector_store, modality
-
-# Batch upload
-POST /api/embed-folder
-FormData: files[], vector_store
-```
-
-### Vector Stores
-```bash
-GET    /api/vector-stores           # List all stores
-POST   /api/vector-stores           # Create store
-GET    /api/vector-stores/{name}    # Get store info
-DELETE /api/vector-stores/{name}    # Delete store
-GET    /api/vector-stores/{name}/files  # List files
-```
-
-**Full API Documentation**: http://localhost:8000/docs
-
-## 🤔 How RAG Works with EMBEd
-
-### **EMBEd as Embedding-as-a-Service**
-
-EMBEd handles all embedding generation for you using **Meta's ImageBind** model:
-
-```
-Your RAG Application Flow:
-┌─────────────────────────────────────────────────────────────┐
-│ 1. INDEXING (One-time setup)                                │
-│    Your Docs → EMBEd API → ImageBind → ChromaDB             │
-│                           (1024-dim embeddings)              │
-├─────────────────────────────────────────────────────────────┤
-│ 2. RETRIEVAL (Every query)                                  │
-│    User Query → EMBEd API → ImageBind → Search ChromaDB     │
-│                            (query embedding)                 │
-├─────────────────────────────────────────────────────────────┤
-│ 3. GENERATION (Your LLM)                                    │
-│    Retrieved Context + Query → OpenAI/Claude → Answer       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### **Key Points:**
-
-✅ **EMBEd generates all embeddings** - You don't need to manage ImageBind
-✅ **Consistent embeddings** - Same model for indexing and retrieval
-✅ **Works with any LLM** - Use OpenAI, Claude, Llama, etc. for generation
-✅ **Text-only or multi-modal** - Your choice based on use case
-
-### **Important: Model Consistency**
-
-**EMBEd uses ImageBind for ALL embeddings:**
-- **Embedding Model**: Meta ImageBind
-- **Dimensions**: 1024
-- **Normalization**: L2 normalized
-- **Similarity**: Cosine similarity
-
-**For RAG applications:**
-- ✅ **Use EMBEd's search API** - EMBEd generates query embeddings automatically
-- ✅ **Any LLM for generation** - OpenAI, Claude, Llama, etc.
-- ❌ **Don't mix embedding models** - All embeddings must be from ImageBind
-
-```python
-# ✅ CORRECT: Use EMBEd's search API
-results = embed_client.search("my_store", "user query")
-# EMBEd generates ImageBind embedding for the query
-
-# ❌ WRONG: Don't use different embedding models
-openai_embedding = openai.Embedding.create(input="query")  # Different model!
-# This won't work - OpenAI embeddings are incompatible with ImageBind
-```
-
-## 💡 Use Cases
-
-### 1. Text-Only RAG (Like ChatGPT with Your Documents)
-
-**Step 1: Upload Documents via Web UI**
-1. Open http://localhost:8000
-2. Create vector store "knowledge_base"
-3. Upload your documents (company_policy.pdf, product_docs.pdf, meeting_notes.txt)
-4. EMBEd automatically generates and stores embeddings ✨
-
-**Step 2: Query in Your Application**
-```python
-from openembed import OpenEmbedClient
-from openai import OpenAI
-
-# Initialize clients
-embed_client = OpenEmbedClient("http://localhost:8000")
-openai_client = OpenAI()
-
-# Retrieve relevant context from EMBEd
-user_question = "What is our vacation policy?"
-results = embed_client.search("knowledge_base", user_question, n_results=5)
-
-# Build context from search results
-context = "\n\n".join([
-    f"Source: {r['metadata']['filename']}\n{r['metadata'].get('text_content', '')}"
-    for r in results
-])
-
-# Generate answer with your LLM
-response = openai_client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "system", "content": "Answer based on the provided context."},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {user_question}"}
-    ]
-)
-
-print(response.choices[0].message.content)
-```
-
-**That's it!** Upload once via UI, query from any Python script. True Embedding-as-a-Service! 🎉
-
-### 2. Multi-Modal RAG (Text + Images + Videos)
-
-**Step 1: Upload Mixed Media via Web UI**
-1. Open http://localhost:8000
-2. Create vector store "product_catalog"
-3. Upload product descriptions (.txt), images (.jpg), and demo videos (.mp4)
-4. All content is embedded in unified space ✨
-
-**Step 2: Cross-Modal Search**
-```python
-embed_client = OpenEmbedClient("http://localhost:8000")
-
-# Search with text, get images/videos/text results!
-results = embed_client.search(
-    "product_catalog",
-    "red running shoes with good cushioning",
-    n_results=10
-)
-
-# Results include text, images, and videos ranked by relevance
-for r in results:
-    print(f"{r['modality']}: {r['metadata']['filename']} - {r['similarity']:.1%}")
-```
-
-### 3. Cross-Modal Search Examples
-
-```python
-# Find images using text description
-images = embed_client.search(
-    "product_catalog",
-    "red sneakers",
-    modality_filter="image"  # Only return images
-)
-
-# Find similar videos using text
-videos = embed_client.search(
-    "video_library",
-    "sunset over ocean",
-    modality_filter="video"
-)
-
-# Find related content using an image
-results = embed_client.search_by_file(
-    "content_library",
-    "reference_image.jpg"
-)
-```
-
-### 4. Content Organization & Semantic Search
-
-**Step 1: Organize via Web UI**
-1. Open http://localhost:8000
-2. Create vector store "my_archive"
-3. Drag & drop your entire document folder (PDFs, images, videos, audio)
-4. EMBEd auto-detects modalities and embeds everything ✨
-
-**Step 2: Semantic Search**
-```python
-embed_client = OpenEmbedClient("http://localhost:8000")
-
-# Search across ALL your content (text, images, videos, audio)
-results = embed_client.search("my_archive", "quarterly financial report")
-
-# Works across modalities - finds matching PDFs, presentation slides, charts!
-for r in results:
-    print(f"Found in {r['metadata']['filename']} ({r['modality']})")
-```
-
-## 🎯 Why Use EMBEd?
-
-### **Advantages:**
-
-✅ **No Model Management** - We handle ImageBind for you (4.5GB model)
-✅ **Multi-Modal Support** - 7 modalities in unified embedding space
-✅ **Cross-Modal Search** - Find images with text, videos with audio
-✅ **Open Source** - No vendor lock-in, self-hosted
-✅ **Production Ready** - Docker deployment, persistent storage
-✅ **Easy Integration** - Python SDK + REST API
-✅ **Free** - No API costs, run on your infrastructure
-
-### **When to Use EMBEd:**
-
-**Perfect For:**
-- 🎯 Multi-modal RAG applications
-- 🎯 Cross-modal search (text → images, audio → videos)
-- 🎯 Content organization across different media types
-- 🎯 Research projects with mixed media
-- 🎯 Self-hosted embedding service
-- 🎯 Text-only RAG with ImageBind embeddings
-
-**Consider Alternatives If:**
-- ❌ You need OpenAI/Cohere embeddings specifically
-- ❌ You want to use custom embedding models
-- ❌ You only need text embeddings and want smaller models
-- ❌ You prefer managed cloud services (Pinecone, Weaviate)
-
-### **Comparison:**
-
-| Feature | EMBEd | Pinecone | Weaviate | OpenAI |
-|---------|-------|----------|----------|--------|
-| **Multi-Modal** | ✅ 7 types | ❌ Text | ⚠️ Limited | ❌ Text |
-| **Self-Hosted** | ✅ Yes | ❌ Cloud | ✅ Yes | ❌ Cloud |
-| **Open Source** | ✅ MIT | ❌ No | ✅ BSD | ❌ No |
-| **Cost** | ✅ Free | 💰 Paid | ✅ Free | 💰 Paid |
-| **Cross-Modal** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-
-## 🏗️ Architecture
-
-**Tech Stack:**
-- **Backend**: FastAPI (Python 3.9+)
-- **Frontend**: React 18 + TypeScript + Material-UI
-- **Vector DB**: ChromaDB (persistent storage)
-- **Embedding Model**: Meta ImageBind (1024-dimensional)
-- **Analytics**: SQLite for usage tracking
-- **Deployment**: Docker + Docker Compose
-
-**Project Structure:**
-```
-OpenEmbed/
-├── app/                    # FastAPI backend
-│   ├── api/               # API routes
-│   ├── services/          # ImageBind + ChromaDB
-│   ├── models/            # Pydantic schemas
-│   └── utils/             # Utilities
-├── frontend/              # React + TypeScript UI
-│   └── src/pages/         # Dashboard, Upload, Search, Stores
-├── sdk/                   # Official SDKs
-│   ├── python/           # Python SDK
-│   └── examples/         # Usage examples
-└── demo_files/           # Sample files
-```
-
-## ⚙️ Configuration
-
-Key environment variables (`.env` file):
+Create `.env` file (optional):
 
 ```env
-# Device: cpu, cuda, or mps (Apple Silicon)
-DEVICE=mps
+# Device (auto, cpu, cuda, mps)
+DEVICE=auto
 
 # Storage
 CHROMA_PERSIST_DIR=./chroma_db
@@ -437,48 +193,152 @@ UPLOAD_DIR=./uploads
 MAX_FILE_SIZE=500000000  # 500MB
 ```
 
-## 🚀 Performance
+---
+
+## API Documentation
+
+Interactive API docs available at: **http://localhost:8000/docs**
+
+### Key Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/vector-stores` | GET | List all vector stores |
+| `/api/vector-stores` | POST | Create new vector store |
+| `/api/embed` | POST | Upload and embed file |
+| `/api/search-by-id` | POST | Search by text query |
+| `/api/search` | POST | Search by file upload |
+
+---
+
+## Python SDK
+
+**Install:**
+```bash
+pip install requests
+```
+
+**Usage:**
+```python
+from openembed import OpenEmbedClient
+
+client = OpenEmbedClient("http://localhost:8000")
+
+# Search
+results = client.search("my_store", "query text")
+
+# List stores
+stores = client.list_stores()
+
+# Get store info
+info = client.get_store("my_store")
+
+# Upload (advanced)
+client.upload("my_store", "file.pdf", "text")
+```
+
+Full SDK docs: [sdk/python/README.md](sdk/python/README.md)
+
+---
+
+## Examples
+
+Check out the [examples](examples/) folder for:
+- **get_started.py** - Complete RAG application with LM Studio
+- **test_get_started.py** - Automated testing
+
+Run example:
+```bash
+cd examples
+python get_started.py
+```
+
+---
+
+## Performance
 
 | Device | Speed | Recommended For |
-|--------|-------|----------------|
-| **GPU (CUDA)** | 0.5-2s per file | Production |
-| **Apple MPS** | 1-3s per file | Development/Production |
-| **CPU** | 5-20s per file | Testing only |
+|--------|-------|-----------------|
+| GPU (CUDA) | 0.5-2s/file | Production |
+| Apple MPS | 1-3s/file | Development/Production |
+| CPU | 5-20s/file | Testing only |
 
-**Model**: ImageBind (~4.5GB, auto-downloaded on first run)
-**Embedding Size**: 1024 dimensions
-**Storage**: ChromaDB with persistent disk storage
+**Model:** ImageBind (~4.5GB, auto-downloaded on first run)
+**Storage:** ChromaDB with persistent disk storage
 
-## 📚 Documentation
+---
 
-- **Python SDK**: [sdk/python/README.md](sdk/python/README.md)
-- **Examples**: [sdk/examples/](sdk/examples/)
-- **API Docs**: http://localhost:8000/docs (when running)
+## Supported File Formats
 
-## 🤝 Contributing
+| Modality | Formats |
+|----------|---------|
+| Text | .txt, .md, .pdf, .doc, .docx |
+| Image | .jpg, .png, .gif, .webp |
+| Video | .mp4, .avi, .mov, .mkv |
+| Audio | .wav, .mp3, .flac, .m4a |
+
+---
+
+## Troubleshooting
+
+<details>
+<summary>Model download taking too long?</summary>
+
+First run downloads ImageBind model (~4.5GB). This is normal. Subsequent starts are instant.
+</details>
+
+<details>
+<summary>Out of memory error?</summary>
+
+ImageBind requires ~6GB RAM. Try:
+- Close other applications
+- Use `DEVICE=cpu` in `.env`
+- Increase Docker memory limit
+</details>
+
+<details>
+<summary>Port 8000 already in use?</summary>
+
+Change port in `docker-compose.yml`:
+```yaml
+ports:
+  - "8080:8000"  # Use 8080 instead
+```
+</details>
+
+---
+
+## Contributing
 
 Contributions welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Submit a pull request
 
-## 📄 License
+---
 
-MIT License - see LICENSE file
+## License
 
-## 🙏 Acknowledgments
-
-Built with:
-- [ImageBind](https://github.com/facebookresearch/ImageBind) - Meta's multi-modal embeddings
-- [ChromaDB](https://github.com/chroma-core/chroma) - Vector database
-- [FastAPI](https://github.com/tiangolo/fastapi) - Modern Python web framework
-- [React](https://github.com/facebook/react) + [Material-UI](https://github.com/mui/material-ui) - Frontend
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/Himanshu8881212/EMBEd/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Himanshu8881212/EMBEd/discussions)
+MIT License - see [LICENSE](LICENSE) file
 
 ---
 
-**OpenEmbed** - Unified multi-modal embeddings made simple
+## Acknowledgments
+
+Built with:
+- [ImageBind](https://github.com/facebookresearch/ImageBind) by Meta - Multi-modal embeddings
+- [ChromaDB](https://github.com/chroma-core/chroma) - Vector database
+- [FastAPI](https://github.com/tiangolo/fastapi) - Backend framework
+- [React](https://github.com/facebook/react) + [Material-UI](https://github.com/mui/material-ui) - Frontend
+
+---
+
+## Support
+
+- 🐛 **Issues:** [GitHub Issues](https://github.com/Himanshu8881212/EMBEd/issues)
+- 💬 **Discussions:** [GitHub Discussions](https://github.com/Himanshu8881212/EMBEd/discussions)
+- ⭐ **Star us on GitHub** if you find this useful!
+
+---
+
+**Made with ❤️ for the open-source community**
