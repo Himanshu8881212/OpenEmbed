@@ -2,6 +2,8 @@
 
 Complete, production-ready RAG application templates using EMBEd.
 
+**📖 For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)**
+
 ## 🎯 Quick Start
 
 ### **Switch Between Text-Only and Multi-Modal RAG with One Parameter!**

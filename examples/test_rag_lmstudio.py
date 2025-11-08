@@ -65,7 +65,7 @@ def test_lmstudio_connection(url: str = "http://localhost:1234/v1", model: str =
         return False
 
 
-def test_embed_connection(url: str = "http://localhost:8000"):
+def test_embed_connection(url: str = "http://localhost:8001"):
     """Test EMBEd connection."""
     print("\n" + "="*80)
     print("🔌 Testing EMBEd Connection")
@@ -102,7 +102,7 @@ def run_rag_tests(store_name: str = "multimodal_demo"):
     print("\n1️⃣  Initializing RAG with LM Studio...")
     try:
         rag = EMBEdRAG(
-            embed_url="http://localhost:8000",
+            embed_url="http://localhost:8001",
             llm_provider="lmstudio",
             llm_url="http://localhost:1234/v1",
             llm_model="qwen/qwen3-vl-4b",
