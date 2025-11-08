@@ -79,12 +79,15 @@ const HomePage: React.FC = () => {
         totalFiles += count;
         totalSizeBytes += sizeBytes;
 
-        // Safely handle modality field which might be null or undefined
-        if (store.modality) {
-          const modality = store.modality.toLowerCase();
-          if (modality in modalityCounts) {
-            modalityCounts[modality as keyof typeof modalityCounts] += count;
-          }
+        // Get modality counts from metadata (added by backend)
+        if (store.metadata && store.metadata.modality_counts) {
+          const counts = store.metadata.modality_counts;
+          Object.keys(counts).forEach((modality: string) => {
+            const modalityKey = modality.toLowerCase();
+            if (modalityKey in modalityCounts) {
+              modalityCounts[modalityKey as keyof typeof modalityCounts] += counts[modality];
+            }
+          });
         }
       });
 

@@ -96,8 +96,9 @@ async def list_vector_stores():
 
         stores = []
         for col in collections:
-            # Calculate storage size for this store
+            # Calculate storage size and modality counts for this store
             size_bytes = 0
+            modality_counts = {}
             try:
                 items = chroma_service.get_all_items(col['name'])
                 if items and 'ids' in items and 'metadatas' in items:
@@ -108,10 +109,18 @@ async def list_vector_stores():
                             file_ids.append(metadata['file_id'])
                             modalities.append(metadata['modality'])
 
+                            # Count modalities
+                            modality = metadata['modality']
+                            modality_counts[modality] = modality_counts.get(modality, 0) + 1
+
                     if file_ids:
                         size_bytes = file_handler.calculate_storage_size(file_ids, modalities)
             except Exception as e:
                 logger.warning(f"Could not calculate size for store {col['name']}: {e}")
+
+            # Add modality_counts to metadata
+            metadata_with_counts = col['metadata'].copy()
+            metadata_with_counts['modality_counts'] = modality_counts
 
             stores.append(VectorStoreInfo(
                 name=col['name'],
@@ -119,7 +128,7 @@ async def list_vector_stores():
                 count=col['count'],
                 modality=col['metadata'].get('modality'),
                 created_at=datetime.fromisoformat(col['metadata'].get('created_at', datetime.utcnow().isoformat())),
-                metadata=col['metadata'],
+                metadata=metadata_with_counts,
                 size_bytes=size_bytes
             ))
 
