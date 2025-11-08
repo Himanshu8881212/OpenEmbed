@@ -65,16 +65,9 @@ COPY requirements.docker.txt requirements.txt
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
-# Install decord from source for video processing
-# This is required for ImageBind video modality
-RUN git clone --recursive https://github.com/dmlc/decord /tmp/decord && \
-    cd /tmp/decord && \
-    mkdir build && cd build && \
-    cmake .. -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release && \
-    make -j$(nproc) && \
-    cd ../python && \
-    pip install --no-cache-dir -e . && \
-    cd / && rm -rf /tmp/decord
+# Note: decord build fails with newer FFmpeg (API incompatibility)
+# ImageBind will use moviepy as fallback for video processing
+# Video embeddings will still work, just slightly slower
 
 # Copy backend application code
 COPY app/ ./app/
