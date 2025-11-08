@@ -34,7 +34,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies including decord build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
@@ -47,6 +47,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libglib2.0-0 \
     libsndfile1 \
+    cmake \
+    libavcodec-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
@@ -59,6 +64,17 @@ COPY requirements.docker.txt requirements.txt
 # Note: This will take a while on first build due to PyTorch
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
+
+# Install decord from source for video processing
+# This is required for ImageBind video modality
+RUN git clone --recursive https://github.com/dmlc/decord /tmp/decord && \
+    cd /tmp/decord && \
+    mkdir build && cd build && \
+    cmake .. -DUSE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && \
+    cd ../python && \
+    pip install --no-cache-dir -e . && \
+    cd / && rm -rf /tmp/decord
 
 # Copy backend application code
 COPY app/ ./app/
@@ -79,10 +95,13 @@ RUN mkdir -p \
     /app/chroma_db \
     /app/logs \
     /app/cache_dir \
-    /app/model_cache
+    /app/model_cache \
+    /app/.checkpoints
 
-# Note: ImageBind model (~2.4GB) will be downloaded on first container startup
-# This is cached in the model_cache volume for subsequent runs
+# Copy pre-downloaded ImageBind model (4.5GB) into container
+# This eliminates the need to download the model on every container startup
+# MUCH FASTER! Model loads in seconds instead of 5-10 minutes
+COPY .checkpoints/imagebind_huge.pth /app/.checkpoints/imagebind_huge.pth
 
 # Set permissions
 RUN chmod -R 755 /app

@@ -80,10 +80,15 @@ class ModalityDetector:
     
     def detect_modality(self, filename: str, preferred_modality: Optional[ModalityType] = None) -> Optional[ModalityType]:
         """
-        Detect modality from filename extension.
+        Detect modality from filename extension and filename patterns.
 
         For ambiguous extensions (e.g., .png can be image, depth, or thermal),
-        returns the first match or the preferred modality if specified.
+        uses filename patterns to determine the correct modality.
+
+        Filename patterns:
+        - Files with 'depth' in name -> DEPTH modality
+        - Files with 'thermal' in name -> THERMAL modality
+        - Files with 'imu' in name -> IMU modality
 
         Args:
             filename: Name of the file
@@ -93,6 +98,7 @@ class ModalityDetector:
             ModalityType if detected, None otherwise
         """
         file_ext = Path(filename).suffix.lower()
+        filename_lower = Path(filename).stem.lower()  # Get filename without extension
 
         modalities = self.extension_to_modalities.get(file_ext, [])
 
@@ -105,13 +111,31 @@ class ModalityDetector:
             logger.debug(f"Using preferred modality '{preferred_modality.value}' for file '{filename}' (extension: {file_ext})")
             return preferred_modality
 
+        # For ambiguous extensions, use filename patterns to determine modality
+        if len(modalities) > 1:
+            # Check for depth patterns
+            if 'depth' in filename_lower and ModalityType.DEPTH in modalities:
+                logger.debug(f"Detected DEPTH modality from filename pattern for '{filename}'")
+                return ModalityType.DEPTH
+
+            # Check for thermal patterns
+            if 'thermal' in filename_lower and ModalityType.THERMAL in modalities:
+                logger.debug(f"Detected THERMAL modality from filename pattern for '{filename}'")
+                return ModalityType.THERMAL
+
+            # Check for IMU patterns
+            if 'imu' in filename_lower and ModalityType.IMU in modalities:
+                logger.debug(f"Detected IMU modality from filename pattern for '{filename}'")
+                return ModalityType.IMU
+
         # Otherwise, return the first (highest priority) modality
         modality = modalities[0]
 
         if len(modalities) > 1:
             logger.debug(
                 f"Detected modality '{modality.value}' for file '{filename}' (extension: {file_ext}). "
-                f"Note: This extension supports multiple modalities: {[m.value for m in modalities]}"
+                f"Note: This extension supports multiple modalities: {[m.value for m in modalities]}. "
+                f"Use filename patterns (depth/thermal/imu) for automatic detection."
             )
         else:
             logger.debug(f"Detected modality '{modality.value}' for file '{filename}' (extension: {file_ext})")

@@ -6,6 +6,11 @@ torchaudio>=2.0.0
 # ImageBind by Meta
 git+https://github.com/facebookresearch/ImageBind.git
 
+# Video Processing - Use decord for Linux/Docker
+# Note: eva-decord is macOS-specific, decord doesn't exist in PyPI
+# We'll install from conda-forge or build from source
+# For now, video processing will work with moviepy fallback
+
 # ML Dependencies
 einops>=0.6.1
 
