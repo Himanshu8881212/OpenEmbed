@@ -1,155 +1,267 @@
 # EMBEd - Self-Hosted Multi-Modal Embeddings
 
-**Turn your documents, images, videos, and audio into searchable embeddings. Locally.**
+**Turn your documents, images, videos, and audio into searchable embeddings. Runs locally.**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
----
-
-## What is EMBEd?
-
-EMBEd is a **self-hosted embedding service** that helps you build RAG (Retrieval Augmented Generation) applications. Upload your files through a web interface, search them from Python.
-
-**Think Pinecone or Weaviate, but:**
-- ✅ Self-hosted (runs on your machine)
-- ✅ Multi-modal (text, images, videos, audio)
-- ✅ Open source (MIT license)
-- ✅ Free (no API costs)
+> Like Pinecone or Weaviate, but self-hosted and multi-modal. Built on Meta's ImageBind.
 
 ---
 
-## Quick Start
+## 🚀 Getting Started
 
-**Requirements:** Docker Desktop ([download](https://www.docker.com/products/docker-desktop))
+### Step 1: Run the Docker Container
 
 ```bash
-# Clone and start
+# Clone the repository
 git clone https://github.com/Himanshu8881212/EMBEd.git
 cd EMBEd
+
+# Start EMBEd service
 docker-compose up -d
 
-# Wait 30 seconds for model to load, then open:
-# http://localhost:8000
+# Wait ~30 seconds for model to load
+# ✅ Service running at http://localhost:8000
 ```
 
-That's it! 🎉
+### Step 2: Upload Your Files
+
+Open **http://localhost:8000** in your browser:
+
+1. Create a vector store (e.g., "my_documents")
+2. Drag & drop your files (PDFs, images, videos, audio)
+3. EMBEd automatically generates embeddings ✨
+
+### Step 3: Query from Python
+
+```python
+# Install SDK
+pip install requests
+
+# Copy this to your project
+from openembed import OpenEmbedClient
+
+# Connect to EMBEd
+client = OpenEmbedClient("http://localhost:8000")
+
+# Search your documents
+results = client.search(
+    vector_store="my_documents",
+    query="What is our vacation policy?",
+    n_results=5
+)
+
+# Use the results
+for result in results:
+    print(f"📄 {result['metadata']['filename']}")
+    print(f"   Similarity: {result['similarity']:.1%}")
+    print(f"   Content: {result['metadata'].get('text_content', 'N/A')[:200]}")
+    print()
+```
+
+**That's it!** Your documents are now searchable. 🎉
 
 ---
 
-## How It Works
+## 💡 Use with RAG (Retrieval Augmented Generation)
 
-### 1. Upload via Web UI
-Open http://localhost:8000 and upload your files:
-- 📄 Documents (.pdf, .txt, .docx)
-- 🖼️ Images (.jpg, .png)
-- 🎥 Videos (.mp4, .mov)
-- 🔊 Audio (.mp3, .wav)
+```python
+from openembed import OpenEmbedClient
+from openai import OpenAI  # or anthropic, or ollama
 
-EMBEd automatically creates embeddings and stores them.
+# 1. Get relevant documents from EMBEd
+embed_client = OpenEmbedClient("http://localhost:8000")
+results = embed_client.search("my_documents", "vacation policy", n_results=3)
 
-### 2. Query from Python
+# 2. Build context from results
+context = "\n\n".join([
+    f"Source: {r['metadata']['filename']}\n{r['metadata'].get('text_content', '')}"
+    for r in results
+])
+
+# 3. Send to your LLM
+openai = OpenAI()
+response = openai.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "Answer using only the provided context."},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: What is our vacation policy?"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+**Works with:** OpenAI, Anthropic Claude, Ollama (Llama, Mistral), LM Studio, or any LLM.
+
+---
+
+## 🎯 What Can You Do?
+
+| Use Case | Description |
+|----------|-------------|
+| **📚 Document Q&A** | Upload your docs → Ask questions in natural language → Get answers with sources |
+| **🔍 Semantic Search** | Search by meaning, not keywords. Works across text, images, videos, audio |
+| **🎨 Multi-Modal RAG** | Search "red running shoes" → Get matching text, images, and videos |
+| **🤖 Chatbot Memory** | Give your chatbot knowledge of your specific documents |
+| **📊 Content Analysis** | Find similar documents, images, or videos automatically |
+
+---
+
+## 📦 Python SDK Reference
 
 ```python
 from openembed import OpenEmbedClient
 
 client = OpenEmbedClient("http://localhost:8000")
-results = client.search("my_store", "your search query")
 
-# Use results in your RAG app, chatbot, search engine, etc.
+# Search (text query)
+results = client.search("store_name", "search query", n_results=10)
+
+# Search (by file)
+results = client.search("store_name", "/path/to/image.jpg")
+
+# List all vector stores
+stores = client.list_stores()
+for store in stores:
+    print(f"{store['name']}: {store['count']} files")
+
+# Get store details
+info = client.get_store("store_name")
+
+# Create new store
+client.create_store("new_store", description="My documents")
+
+# Upload files (advanced - prefer Web UI)
+client.upload("store_name", "document.pdf", modality="text")
+client.upload_batch("store_name", ["file1.jpg", "file2.pdf", "audio.mp3"])
 ```
 
-### 3. Use with Any LLM
-
-```python
-from openai import OpenAI
-
-# Get context from EMBEd
-results = client.search("my_docs", "What's our vacation policy?")
-context = "\n".join([r['metadata'].get('text_content', '') for r in results])
-
-# Send to LLM
-openai = OpenAI()
-response = openai.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "system", "content": "Answer using the context provided."},
-        {"role": "user", "content": f"Context: {context}\n\nQuestion: What's our vacation policy?"}
-    ]
-)
-```
-
-**Works with:** OpenAI, Claude, Llama, Mistral, or any LLM.
+Full SDK documentation: [sdk/python/README.md](sdk/python/README.md)
 
 ---
 
-## Features
+## 🛠️ Features
 
-| Feature | Description |
-|---------|-------------|
-| **7 Modalities** | Text, images, videos, audio, depth maps, thermal, IMU sensors |
-| **Cross-Modal Search** | Find images using text, videos using audio, etc. |
-| **Persistent Storage** | ChromaDB vector database with disk persistence |
-| **Web Interface** | Upload and manage files visually |
-| **Python SDK** | Simple client library for integration |
-| **Docker Ready** | One-command deployment |
-| **Self-Hosted** | Your data stays on your machine |
-
----
-
-## Use Cases
-
-### 📚 Document Q&A (RAG)
-Upload your company docs, policies, manuals → Ask questions in natural language → Get accurate answers with sources.
-
-### 🔍 Semantic Search
-Search across all your content (documents, images, videos) using natural language. Finds meaning, not just keywords.
-
-### 🎨 Multi-Modal Search
-- Upload product images → Search "red running shoes"
-- Upload videos → Search "sunset over ocean"
-- Upload audio → Find similar music or spoken content
-
-### 🤖 Chatbot Knowledge Base
-Feed your chatbot with relevant context from your documents, making it knowledgeable about your specific domain.
+- **7 Modalities:** Text, images, videos, audio, depth maps, thermal, IMU sensors
+- **Cross-Modal Search:** Find images using text descriptions, or vice versa
+- **Persistent Storage:** ChromaDB with disk persistence (your data survives restarts)
+- **1024-dim Embeddings:** Meta ImageBind model (unified embedding space)
+- **Web Interface:** Beautiful UI for uploading and managing files
+- **RESTful API:** Full OpenAPI docs at http://localhost:8000/docs
+- **Self-Hosted:** Your data never leaves your machine
+- **Production Ready:** FastAPI backend + React frontend
 
 ---
 
-## Architecture
+## 📁 Supported Files
 
-```
-┌─────────────────────────────────────────────────┐
-│  Web UI (localhost:8000)                        │
-│  Upload files → Auto-embed → Store in ChromaDB │
-└─────────────────────────────────────────────────┘
-                      ↓
-┌─────────────────────────────────────────────────┐
-│  Python SDK                                      │
-│  Search embeddings → Get relevant results       │
-└─────────────────────────────────────────────────┘
-                      ↓
-┌─────────────────────────────────────────────────┐
-│  Your Application                                │
-│  RAG, Chatbot, Search, Analysis, etc.           │
-└─────────────────────────────────────────────────┘
+| Type | Formats |
+|------|---------|
+| **Documents** | .txt, .md, .pdf, .doc, .docx, .rtf |
+| **Images** | .jpg, .png, .gif, .webp, .bmp |
+| **Videos** | .mp4, .avi, .mov, .mkv, .webm |
+| **Audio** | .mp3, .wav, .flac, .m4a, .ogg |
+
+---
+
+## 🔧 Configuration
+
+EMBEd auto-detects your hardware (CPU/GPU/Apple Silicon). To customize:
+
+```bash
+# Create .env file
+cat > .env << EOF
+DEVICE=auto           # Options: auto, cpu, cuda, mps
+CHROMA_PERSIST_DIR=./chroma_db
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=500000000  # 500MB
+EOF
 ```
 
-**Embedding Model:** Meta's ImageBind (1024 dimensions, unified multi-modal space)
-**Vector DB:** ChromaDB with persistent storage
-**Backend:** FastAPI + Python
-**Frontend:** React + TypeScript + Material-UI
+---
+
+## ⚡ Performance
+
+| Device | Speed | Use For |
+|--------|-------|---------|
+| **NVIDIA GPU** | 0.5-2s per file | Production |
+| **Apple Silicon** | 1-3s per file | Production/Dev |
+| **CPU** | 5-20s per file | Testing only |
+
+**Note:** First run downloads ImageBind model (~4.5GB). Subsequent runs are instant.
 
 ---
 
-## Manual Installation
+## 🐛 Troubleshooting
 
 <details>
-<summary>Click to expand manual setup instructions</summary>
+<summary><b>Service won't start?</b></summary>
 
-**Requirements:**
-- Python 3.9+
-- Node.js 16+
-- 8GB+ RAM
+```bash
+# Check logs
+docker-compose logs -f
+
+# Restart service
+docker-compose down
+docker-compose up -d
+```
+</details>
+
+<details>
+<summary><b>Out of memory error?</b></summary>
+
+ImageBind needs ~6GB RAM. Try:
+```bash
+# Use CPU instead of GPU
+echo "DEVICE=cpu" > .env
+docker-compose down
+docker-compose up -d
+```
+
+Or increase Docker's memory limit in Docker Desktop settings.
+</details>
+
+<details>
+<summary><b>Port 8000 already in use?</b></summary>
+
+Edit `docker-compose.yml`:
+```yaml
+ports:
+  - "8080:8000"  # Change to 8080 or any free port
+```
+</details>
+
+<details>
+<summary><b>Can't connect to http://localhost:8000?</b></summary>
+
+Wait 30-60 seconds for model to load. Check status:
+```bash
+docker-compose logs -f
+# Look for: "Application startup complete"
+```
+</details>
+
+---
+
+## 📖 Examples
+
+See working examples in [`examples/`](examples/):
+
+```bash
+cd examples
+python get_started.py  # Complete RAG application with LM Studio
+```
+
+---
+
+## 🏗️ Manual Installation (Advanced)
+
+<details>
+<summary>Click to expand manual setup without Docker</summary>
+
+**Requirements:** Python 3.9+, Node.js 16+, 8GB+ RAM
 
 ```bash
 # Backend
@@ -158,187 +270,89 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # Frontend
-cd frontend
-npm install
-cd ..
+cd frontend && npm install && cd ..
 
-# Run (Terminal 1: Backend)
+# Start backend (Terminal 1)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# Run (Terminal 2: Frontend)
+# Start frontend (Terminal 2)
 cd frontend && npm start
 ```
 
 Access:
 - Web UI: http://localhost:3000
-- API Docs: http://localhost:8000/docs
+- API: http://localhost:8000/docs
 
 </details>
 
 ---
 
-## Configuration
+## 🏛️ Architecture
 
-Create `.env` file (optional):
-
-```env
-# Device (auto, cpu, cuda, mps)
-DEVICE=auto
-
-# Storage
-CHROMA_PERSIST_DIR=./chroma_db
-UPLOAD_DIR=./uploads
-
-# Limits
-MAX_FILE_SIZE=500000000  # 500MB
+```
+┌──────────────────────────────────────┐
+│   Web UI (localhost:8000)            │
+│   • Upload files visually            │
+│   • Manage vector stores             │
+│   • View embeddings                  │
+└──────────────────────────────────────┘
+                  ↓
+┌──────────────────────────────────────┐
+│   EMBEd Service                      │
+│   • ImageBind (embedding generation) │
+│   • ChromaDB (vector storage)        │
+│   • FastAPI (REST API)               │
+└──────────────────────────────────────┘
+                  ↓
+┌──────────────────────────────────────┐
+│   Your Python Application            │
+│   • Query via SDK                    │
+│   • Use in RAG/search/chatbot        │
+│   • Integrate with any LLM           │
+└──────────────────────────────────────┘
 ```
 
 ---
 
-## API Documentation
+## 🤝 Contributing
 
-Interactive API docs available at: **http://localhost:8000/docs**
+Contributions welcome!
 
-### Key Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/vector-stores` | GET | List all vector stores |
-| `/api/vector-stores` | POST | Create new vector store |
-| `/api/embed` | POST | Upload and embed file |
-| `/api/search-by-id` | POST | Search by text query |
-| `/api/search` | POST | Search by file upload |
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing`)
+5. Open a Pull Request
 
 ---
 
-## Python SDK
-
-**Install:**
-```bash
-pip install requests
-```
-
-**Usage:**
-```python
-from openembed import OpenEmbedClient
-
-client = OpenEmbedClient("http://localhost:8000")
-
-# Search
-results = client.search("my_store", "query text")
-
-# List stores
-stores = client.list_stores()
-
-# Get store info
-info = client.get_store("my_store")
-
-# Upload (advanced)
-client.upload("my_store", "file.pdf", "text")
-```
-
-Full SDK docs: [sdk/python/README.md](sdk/python/README.md)
-
----
-
-## Examples
-
-Check out the [examples](examples/) folder for:
-- **get_started.py** - Complete RAG application with LM Studio
-- **test_get_started.py** - Automated testing
-
-Run example:
-```bash
-cd examples
-python get_started.py
-```
-
----
-
-## Performance
-
-| Device | Speed | Recommended For |
-|--------|-------|-----------------|
-| GPU (CUDA) | 0.5-2s/file | Production |
-| Apple MPS | 1-3s/file | Development/Production |
-| CPU | 5-20s/file | Testing only |
-
-**Model:** ImageBind (~4.5GB, auto-downloaded on first run)
-**Storage:** ChromaDB with persistent disk storage
-
----
-
-## Supported File Formats
-
-| Modality | Formats |
-|----------|---------|
-| Text | .txt, .md, .pdf, .doc, .docx |
-| Image | .jpg, .png, .gif, .webp |
-| Video | .mp4, .avi, .mov, .mkv |
-| Audio | .wav, .mp3, .flac, .m4a |
-
----
-
-## Troubleshooting
-
-<details>
-<summary>Model download taking too long?</summary>
-
-First run downloads ImageBind model (~4.5GB). This is normal. Subsequent starts are instant.
-</details>
-
-<details>
-<summary>Out of memory error?</summary>
-
-ImageBind requires ~6GB RAM. Try:
-- Close other applications
-- Use `DEVICE=cpu` in `.env`
-- Increase Docker memory limit
-</details>
-
-<details>
-<summary>Port 8000 already in use?</summary>
-
-Change port in `docker-compose.yml`:
-```yaml
-ports:
-  - "8080:8000"  # Use 8080 instead
-```
-</details>
-
----
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
-
----
-
-## License
+## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file
 
+Free to use, modify, and distribute.
+
 ---
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 Built with:
-- [ImageBind](https://github.com/facebookresearch/ImageBind) by Meta - Multi-modal embeddings
-- [ChromaDB](https://github.com/chroma-core/chroma) - Vector database
-- [FastAPI](https://github.com/tiangolo/fastapi) - Backend framework
-- [React](https://github.com/facebook/react) + [Material-UI](https://github.com/mui/material-ui) - Frontend
+- **[ImageBind](https://github.com/facebookresearch/ImageBind)** by Meta AI - Multi-modal embeddings
+- **[ChromaDB](https://github.com/chroma-core/chroma)** - Vector database
+- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern Python web framework
+- **[React](https://react.dev/)** + **[Material-UI](https://mui.com/)** - Beautiful frontend
 
 ---
 
-## Support
+## 💬 Support & Community
 
-- 🐛 **Issues:** [GitHub Issues](https://github.com/Himanshu8881212/EMBEd/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/Himanshu8881212/EMBEd/discussions)
-- ⭐ **Star us on GitHub** if you find this useful!
+- 🐛 **Bug Reports:** [GitHub Issues](https://github.com/Himanshu8881212/EMBEd/issues)
+- 💡 **Feature Requests:** [GitHub Discussions](https://github.com/Himanshu8881212/EMBEd/discussions)
+- ⭐ **Star us on GitHub** if you find EMBEd useful!
+- 🔗 **Share** with others building RAG applications
 
 ---
 
-**Made with ❤️ for the open-source community**
+<p align="center">
+  <b>Made with ❤️ for the open-source AI community</b>
+</p>
