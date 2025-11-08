@@ -283,7 +283,6 @@ async def embed_folder(
         for file in files:
             try:
                 # Auto-detect modality from file extension
-                modality_detector = ModalityDetector()
                 detected_modality = modality_detector.detect_modality(file.filename)
 
                 if not detected_modality:

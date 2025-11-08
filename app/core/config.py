@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     upload_dir: str = Field(default="./uploads", env="UPLOAD_DIR")
 
     # Text formats - documents and plain text
+    # Note: .csv and .json removed to avoid conflict with IMU data
     allowed_text_formats: List[str] = Field(
-        default=[".txt", ".json", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
+        default=[".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
         env="ALLOWED_TEXT_FORMATS"
     )
 
@@ -61,8 +62,9 @@ class Settings(BaseSettings):
 
     # Depth map formats - depth data formats
     # .png is supported but requires explicit modality specification (defaults to image)
+    # Note: .npy/.npz removed to avoid conflict with IMU data
     allowed_depth_formats: List[str] = Field(
-        default=[".png", ".npy", ".npz", ".exr", ".pfm"],
+        default=[".png", ".exr", ".pfm"],
         env="ALLOWED_DEPTH_FORMATS"
     )
 

@@ -1,0 +1,4 @@
+"""
+OpenEmbed test suite.
+"""
+
