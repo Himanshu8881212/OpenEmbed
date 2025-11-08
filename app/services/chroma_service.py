@@ -96,25 +96,29 @@ class ChromaService:
             logger.error(f"Failed to create collection {name}: {e}")
             return False
 
-    def get_collection(self, name: str):
+    def get_collection(self, name: str, silent: bool = False):
         """
         Get an existing collection.
 
         Args:
             name: Collection name
+            silent: If True, don't log errors when collection doesn't exist (useful for existence checks)
 
         Returns:
             Collection object or None if not found
         """
         if not self._initialized:
-            logger.error("Service not initialized")
+            if not silent:
+                logger.error("Service not initialized")
             return None
 
         try:
             collection = self.client.get_collection(name=name)
             return collection
         except Exception as e:
-            logger.error(f"Failed to get collection {name}: {e}")
+            # Only log error if not in silent mode (used for existence checks)
+            if not silent:
+                logger.error(f"Failed to get collection {name}: {e}")
             return None
 
     def list_collections(self) -> List[Dict[str, Any]]:
@@ -356,7 +360,8 @@ class ChromaService:
             bool: True if exists, False otherwise
         """
         try:
-            collection = self.get_collection(name)
+            # Use silent=True to avoid logging errors when checking existence
+            collection = self.get_collection(name, silent=True)
             return collection is not None
         except:
             return False
