@@ -296,11 +296,13 @@ async def embed_file(
             embedding = imagebind_service.generate_depth_embedding(str(file_path))
         elif modality == 'thermal':
             embedding = imagebind_service.generate_thermal_embedding(str(file_path))
+        elif modality == 'imu':
+            embedding = imagebind_service.generate_imu_embedding(str(file_path))
 
         if embedding is None:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to generate embedding"
+                detail=f"Failed to generate embedding for modality: {modality}"
             )
 
         # Store embedding
@@ -498,10 +500,21 @@ async def search_similar(request: SearchRequest):
         # Format results
         search_results = []
         for i, result_id in enumerate(results['ids'][0]):
+            distance = float(results['distances'][0][i])
+            # Convert distance to similarity (1 - normalized distance)
+            # ChromaDB uses L2 distance, so we normalize it
+            similarity = 1.0 / (1.0 + distance)
+
+            metadata = results['metadatas'][0][i] if request.include_metadata else None
+            modality = metadata.get('modality', 'unknown') if metadata else 'unknown'
+
             search_results.append(SearchResult(
                 id=result_id,
-                distance=float(results['distances'][0][i]),
-                metadata=results['metadatas'][0][i] if request.include_metadata else None
+                similarity=similarity,
+                distance=distance,
+                modality=modality,
+                metadata=metadata,
+                rank=i + 1
             ))
 
         return SearchResponse(
