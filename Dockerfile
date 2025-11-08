@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy requirements first (for better caching)
-COPY requirements.txt .
+COPY requirements.docker.txt requirements.txt
 
 # Install Python dependencies
 # Note: This will take a while on first build due to PyTorch
@@ -80,6 +80,9 @@ RUN mkdir -p \
     /app/logs \
     /app/cache_dir \
     /app/model_cache
+
+# Note: ImageBind model (~2.4GB) will be downloaded on first container startup
+# This is cached in the model_cache volume for subsequent runs
 
 # Set permissions
 RUN chmod -R 755 /app

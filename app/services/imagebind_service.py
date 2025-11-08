@@ -80,9 +80,16 @@ class ImageBindService:
                 raise
 
             # Load ImageBind model
-            logger.info("Loading ImageBind model...")
+            logger.info("Loading ImageBind model (this may take 2-3 minutes on first run)...")
+            logger.info("Downloading model weights if not cached (~2.4GB)...")
+
+            # Set torch to use less memory during model loading
+            torch.set_num_threads(2)  # Limit CPU threads
+
             self.model = imagebind_model.imagebind_huge(pretrained=True)
             self.model.eval()
+
+            logger.info("Moving model to device...")
             self.model.to(self.device)
             logger.info("✅ ImageBind model loaded successfully")
 

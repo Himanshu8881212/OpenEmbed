@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============================================================================
   # EMBEd Application (Frontend + Backend)
@@ -9,62 +7,66 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: embed-app
-    restart: unless-stopped
-    
+    restart: on-failure:3
+
     ports:
-      - "8000:8000"  # Backend API + Frontend
-    
+      - "8000:8000" # Backend API + Frontend
+
     volumes:
       # Persistent data volumes
-      - embed-chroma:/app/chroma_db          # Vector database
-      - embed-uploads:/app/uploads           # Uploaded files
-      - embed-logs:/app/logs                 # Application logs
-      - embed-cache:/app/cache_dir           # Cache directory
-      - embed-models:/app/model_cache        # Model cache
-      - embed-analytics:/app                 # SQLite analytics database
-    
+      - embed-chroma:/app/chroma_db # Vector database
+      - embed-uploads:/app/uploads # Uploaded files
+      - embed-logs:/app/logs # Application logs
+      - embed-cache:/app/cache_dir # Cache directory
+      - embed-models:/app/model_cache # Model cache
+      - embed-analytics:/app # SQLite analytics database
+
     environment:
       # Application settings
       - APP_NAME=EMBEd
       - APP_VERSION=1.0.0
       - ENVIRONMENT=production
-      
+
       # Server settings
       - HOST=0.0.0.0
       - PORT=8000
       - WORKERS=1
-      
+
       # CORS settings (adjust for your domain)
-      - CORS_ORIGINS=*
-      
+      - CORS_ORIGINS=["*"]
+
       # Logging
       - LOG_LEVEL=INFO
-      
+
       # Model settings
       - MODEL_CACHE_DIR=/app/model_cache
       - CACHE_DIR=/app/cache_dir
-      
+
       # Database settings
       - CHROMA_PERSIST_DIR=/app/chroma_db
       - ANALYTICS_DB_PATH=/app/analytics.db
-      
+
       # Upload settings
       - UPLOAD_DIR=/app/uploads
-      - MAX_UPLOAD_SIZE=100000000  # 100MB
-    
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    
+      - MAX_UPLOAD_SIZE=100000000 # 100MB
+
+    # Health check (disabled - model loading takes time)
+    # healthcheck:
+    #   test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 300s
+
     # Resource limits (adjust based on your hardware)
+    # Increased memory for ImageBind model loading
+    mem_swappiness: 60
+    shm_size: '2gb'
     deploy:
       resources:
         limits:
           cpus: '4'
-          memory: 8G
+          memory: 12G
         reservations:
           cpus: '2'
           memory: 4G
@@ -92,4 +94,3 @@ volumes:
 networks:
   default:
     name: embed-network
-
