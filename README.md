@@ -1,23 +1,40 @@
-# OpenEmbed
+# EMBEd (OpenEmbed)
 
-**Production-ready multi-modal embedding warehouse with unified search across 7 modalities**
+**Open-source multi-modal embedding service for RAG applications**
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18+-blue.svg)](https://reactjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-OpenEmbed is a professional embedding warehouse that enables you to store, search, and retrieve embeddings across **text, images, videos, audio, depth maps, thermal images, and IMU data** in a unified embedding space using Meta's ImageBind.
+**EMBEd** is an open-source **Embedding-as-a-Service** platform that generates and manages embeddings for RAG (Retrieval Augmented Generation) applications. Create vector stores with text-only or multi-modal content, and let EMBEd handle all the embedding generation using Meta's ImageBind model.
+
+## 🎯 What is EMBEd?
+
+EMBEd is a **managed embedding service** that:
+- 📦 **Creates vector stores** for your RAG applications
+- 🤖 **Generates embeddings** using ImageBind (1024-dimensional)
+- 💾 **Stores embeddings** in ChromaDB with persistence
+- 🔍 **Provides search API** for retrieval in RAG workflows
+- 🎨 **Supports 7 modalities** - Text, Image, Video, Audio, Depth, Thermal, IMU
+
+**Perfect for:**
+- ✅ Text-only RAG applications (like ChatGPT with your documents)
+- ✅ Multi-modal RAG (search across text, images, videos, audio)
+- ✅ Cross-modal search (find images using text descriptions)
+- ✅ Content organization and similarity search
 
 ## ✨ Key Features
 
-- 🎯 **7 Modality Support** - Text, Image, Video, Audio, Depth, Thermal, IMU
+- 🎯 **Text-Only RAG** - Upload documents, get embeddings, use in your RAG app
+- 🌈 **Multi-Modal RAG** - Mix text, images, videos, audio in same vector store
 - 🔍 **Cross-Modal Search** - Find images using text, or text using audio
 - 🚀 **Production Ready** - FastAPI backend + React frontend
 - 💾 **Persistent Storage** - ChromaDB vector database
 - 📦 **Python SDK** - Easy integration with your applications
 - 🔌 **RESTful API** - Standard HTTP endpoints
 - 🎨 **Modern UI** - Clean, professional interface
+- 🐳 **Docker Ready** - One-command deployment
 
 ## 🚀 Quick Start
 
@@ -170,36 +187,212 @@ GET    /api/vector-stores/{name}/files  # List files
 
 **Full API Documentation**: http://localhost:8000/docs
 
+## 🤔 How RAG Works with EMBEd
+
+### **EMBEd as Embedding-as-a-Service**
+
+EMBEd handles all embedding generation for you using **Meta's ImageBind** model:
+
+```
+Your RAG Application Flow:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. INDEXING (One-time setup)                                │
+│    Your Docs → EMBEd API → ImageBind → ChromaDB             │
+│                           (1024-dim embeddings)              │
+├─────────────────────────────────────────────────────────────┤
+│ 2. RETRIEVAL (Every query)                                  │
+│    User Query → EMBEd API → ImageBind → Search ChromaDB     │
+│                            (query embedding)                 │
+├─────────────────────────────────────────────────────────────┤
+│ 3. GENERATION (Your LLM)                                    │
+│    Retrieved Context + Query → OpenAI/Claude → Answer       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### **Key Points:**
+
+✅ **EMBEd generates all embeddings** - You don't need to manage ImageBind
+✅ **Consistent embeddings** - Same model for indexing and retrieval
+✅ **Works with any LLM** - Use OpenAI, Claude, Llama, etc. for generation
+✅ **Text-only or multi-modal** - Your choice based on use case
+
+### **Important: Model Consistency**
+
+**EMBEd uses ImageBind for ALL embeddings:**
+- **Embedding Model**: Meta ImageBind
+- **Dimensions**: 1024
+- **Normalization**: L2 normalized
+- **Similarity**: Cosine similarity
+
+**For RAG applications:**
+- ✅ **Use EMBEd's search API** - EMBEd generates query embeddings automatically
+- ✅ **Any LLM for generation** - OpenAI, Claude, Llama, etc.
+- ❌ **Don't mix embedding models** - All embeddings must be from ImageBind
+
+```python
+# ✅ CORRECT: Use EMBEd's search API
+results = embed_client.search("my_store", "user query")
+# EMBEd generates ImageBind embedding for the query
+
+# ❌ WRONG: Don't use different embedding models
+openai_embedding = openai.Embedding.create(input="query")  # Different model!
+# This won't work - OpenAI embeddings are incompatible with ImageBind
+```
+
 ## 💡 Use Cases
 
-### 1. RAG Applications
+### 1. Text-Only RAG (Like ChatGPT with Your Documents)
+
 ```python
-# Retrieve relevant context for LLM
-results = client.search("knowledge_base", user_question, n_results=5)
-context = "\n".join([r['metadata']['filename'] for r in results])
-# Feed context to your LLM
+from openembed import OpenEmbedClient
+from openai import OpenAI
+
+# Initialize clients
+embed_client = OpenEmbedClient("http://localhost:8000")
+openai_client = OpenAI()
+
+# Step 1: Create vector store and upload documents
+embed_client.create_store("knowledge_base", "My company documents")
+embed_client.upload_batch("knowledge_base", [
+    "company_policy.pdf",
+    "product_docs.pdf",
+    "meeting_notes.txt"
+])
+
+# Step 2: RAG Query - Retrieve relevant context
+user_question = "What is our vacation policy?"
+results = embed_client.search("knowledge_base", user_question, n_results=5)
+
+# Step 3: Build context from search results
+context = "\n\n".join([
+    f"Source: {r['metadata']['filename']}\n{r['metadata'].get('content', '')}"
+    for r in results
+])
+
+# Step 4: Generate answer with LLM
+response = openai_client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "Answer based on the provided context."},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {user_question}"}
+    ]
+)
+
+print(response.choices[0].message.content)
 ```
 
-### 2. Multi-Modal Search
-```python
-# Find images using text description
-images = client.search("product_catalog", "red sneakers", modality_filter="image")
+### 2. Multi-Modal RAG (Text + Images + Videos)
 
-# Find similar audio using reference audio
-similar = client.search_by_file("music_library", "reference.mp3")
-```
-
-### 3. Content Organization
 ```python
-# Upload entire folder with auto-detection
-client.upload_batch("my_archive", list(Path("documents").glob("**/*")))
+# Create multi-modal knowledge base
+embed_client.create_store("product_catalog", "E-commerce products")
+
+# Upload mixed content
+embed_client.upload_batch("product_catalog", [
+    "product_descriptions.txt",  # Text descriptions
+    "product_images/*.jpg",       # Product photos
+    "demo_videos/*.mp4",          # Demo videos
+    "customer_reviews.txt"        # Reviews
+])
 
 # Search across all modalities
-results = client.search("my_archive", "quarterly report")
+results = embed_client.search(
+    "product_catalog",
+    "red running shoes with good cushioning",
+    n_results=10
+)
+
+# Results include text, images, and videos ranked by relevance
+for r in results:
+    print(f"{r['modality']}: {r['metadata']['filename']} - {r['similarity']:.1%}")
 ```
+
+### 3. Cross-Modal Search
+
+```python
+# Find images using text description
+images = embed_client.search(
+    "product_catalog",
+    "red sneakers",
+    modality_filter="image"  # Only return images
+)
+
+# Find similar videos using text
+videos = embed_client.search(
+    "video_library",
+    "sunset over ocean",
+    modality_filter="video"
+)
+
+# Find related content using an image
+results = embed_client.search_by_file(
+    "content_library",
+    "reference_image.jpg"
+)
+```
+
+### 4. Content Organization
+
+```python
+# Upload entire folder with auto-detection
+from pathlib import Path
+
+files = list(Path("documents").glob("**/*"))
+embed_client.upload_batch("my_archive", files)
+
+# Search across all modalities
+results = embed_client.search("my_archive", "quarterly financial report")
+```
+
+## 🎯 Why Use EMBEd?
+
+### **Advantages:**
+
+✅ **No Model Management** - We handle ImageBind for you (4.5GB model)
+✅ **Multi-Modal Support** - 7 modalities in unified embedding space
+✅ **Cross-Modal Search** - Find images with text, videos with audio
+✅ **Open Source** - No vendor lock-in, self-hosted
+✅ **Production Ready** - Docker deployment, persistent storage
+✅ **Easy Integration** - Python SDK + REST API
+✅ **Free** - No API costs, run on your infrastructure
+
+### **When to Use EMBEd:**
+
+**Perfect For:**
+- 🎯 Multi-modal RAG applications
+- 🎯 Cross-modal search (text → images, audio → videos)
+- 🎯 Content organization across different media types
+- 🎯 Research projects with mixed media
+- 🎯 Self-hosted embedding service
+- 🎯 Text-only RAG with ImageBind embeddings
+
+**Consider Alternatives If:**
+- ❌ You need OpenAI/Cohere embeddings specifically
+- ❌ You want to use custom embedding models
+- ❌ You only need text embeddings and want smaller models
+- ❌ You prefer managed cloud services (Pinecone, Weaviate)
+
+### **Comparison:**
+
+| Feature | EMBEd | Pinecone | Weaviate | OpenAI |
+|---------|-------|----------|----------|--------|
+| **Multi-Modal** | ✅ 7 types | ❌ Text | ⚠️ Limited | ❌ Text |
+| **Self-Hosted** | ✅ Yes | ❌ Cloud | ✅ Yes | ❌ Cloud |
+| **Open Source** | ✅ MIT | ❌ No | ✅ BSD | ❌ No |
+| **Cost** | ✅ Free | 💰 Paid | ✅ Free | 💰 Paid |
+| **Cross-Modal** | ✅ Yes | ❌ No | ❌ No | ❌ No |
 
 ## 🏗️ Architecture
 
+**Tech Stack:**
+- **Backend**: FastAPI (Python 3.9+)
+- **Frontend**: React 18 + TypeScript + Material-UI
+- **Vector DB**: ChromaDB (persistent storage)
+- **Embedding Model**: Meta ImageBind (1024-dimensional)
+- **Analytics**: SQLite for usage tracking
+- **Deployment**: Docker + Docker Compose
+
+**Project Structure:**
 ```
 OpenEmbed/
 ├── app/                    # FastAPI backend
