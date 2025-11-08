@@ -1,0 +1,146 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Users/himanshuninawe/Work/Working/EMBEd/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/himanshuninawe/Work/Working/EMBEd
+configfile: pytest.ini
+plugins: asyncio-1.2.0, anyio-4.11.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 81 items
+
+tests/test_api.py::TestHealthEndpoint::test_health_check PASSED          [  1%]
+tests/test_api.py::TestVectorStoreEndpoints::test_01_list_stores_empty_or_existing PASSED [  2%]
+tests/test_api.py::TestVectorStoreEndpoints::test_02_create_store PASSED [  3%]
+tests/test_api.py::TestVectorStoreEndpoints::test_03_get_store PASSED    [  4%]
+tests/test_api.py::TestVectorStoreEndpoints::test_04_list_stores_with_test_store PASSED [  6%]
+tests/test_api.py::TestUploadEndpoints::test_01_upload_text_file PASSED  [  7%]
+tests/test_api.py::TestUploadEndpoints::test_02_upload_image_file PASSED [  8%]
+tests/test_api.py::TestUploadEndpoints::test_03_upload_batch PASSED      [  9%]
+tests/test_api.py::TestSearchEndpoints::test_01_search_by_text PASSED    [ 11%]
+tests/test_api.py::TestSearchEndpoints::test_02_search_by_file PASSED    [ 12%]
+tests/test_api.py::TestSearchEndpoints::test_03_search_with_modality_filter PASSED [ 13%]
+tests/test_api.py::TestFileEndpoints::test_01_list_files_in_store PASSED [ 14%]
+tests/test_api.py::TestModalityDetection::test_01_text_modality PASSED   [ 16%]
+tests/test_api.py::TestModalityDetection::test_02_image_modality PASSED  [ 17%]
+tests/test_api.py::TestErrorHandling::test_01_invalid_store_name PASSED  [ 18%]
+tests/test_api.py::TestErrorHandling::test_02_invalid_file_format PASSED [ 19%]
+tests/test_api.py::TestErrorHandling::test_03_search_empty_store PASSED  [ 20%]
+tests/test_api.py::TestCleanup::test_delete_test_store PASSED            [ 22%]
+tests/test_backend_comprehensive.py::TestAPIHealth::test_health_check PASSED [ 23%]
+tests/test_backend_comprehensive.py::TestAPIHealth::test_api_availability PASSED [ 24%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_text_file PASSED [ 25%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_image_file FAILED [ 27%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_video_file FAILED [ 28%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_audio_file FAILED [ 29%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_invalid_modality PASSED [ 30%]
+tests/test_backend_comprehensive.py::TestFileUpload::test_upload_without_file PASSED [ 32%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_create_vector_store FAILED [ 33%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_create_duplicate_vector_store PASSED [ 34%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_list_vector_stores PASSED [ 35%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_get_vector_store PASSED [ 37%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_delete_vector_store PASSED [ 38%]
+tests/test_backend_comprehensive.py::TestVectorStores::test_get_nonexistent_store PASSED [ 39%]
+tests/test_backend_comprehensive.py::TestEmbeddings::test_add_text_embedding PASSED [ 40%]
+tests/test_backend_comprehensive.py::TestEmbeddings::test_embedding_dimensions PASSED [ 41%]
+tests/test_backend_comprehensive.py::TestSearch::test_text_search FAILED [ 43%]
+tests/test_backend_comprehensive.py::TestSearch::test_search_with_limit FAILED [ 44%]
+tests/test_backend_comprehensive.py::TestSearch::test_search_empty_query PASSED [ 45%]
+tests/test_backend_comprehensive.py::TestFileServing::test_serve_uploaded_file PASSED [ 46%]
+tests/test_backend_comprehensive.py::TestFileServing::test_serve_nonexistent_file PASSED [ 48%]
+tests/test_backend_comprehensive.py::TestFileServing::test_serve_invalid_modality PASSED [ 49%]
+tests/test_backend_comprehensive.py::TestEdgeCases::test_large_file_upload PASSED [ 50%]
+tests/test_backend_comprehensive.py::TestEdgeCases::test_concurrent_uploads PASSED [ 51%]
+tests/test_backend_comprehensive.py::TestEdgeCases::test_special_characters_in_filename PASSED [ 53%]
+tests/test_backend_comprehensive.py::TestEdgeCases::test_api_rate_limiting PASSED [ 54%]
+tests/test_database_service.py::TestDatabaseInitialization::test_initialize_database PASSED [ 55%]
+tests/test_database_service.py::TestVectorStoreOperations::test_create_vector_store PASSED [ 56%]
+tests/test_database_service.py::TestVectorStoreOperations::test_create_duplicate_store PASSED [ 58%]
+tests/test_database_service.py::TestVectorStoreOperations::test_list_vector_stores PASSED [ 59%]
+tests/test_database_service.py::TestVectorStoreOperations::test_delete_vector_store PASSED [ 60%]
+tests/test_database_service.py::TestFileUploadOperations::test_record_file_upload PASSED [ 61%]
+tests/test_database_service.py::TestFileUploadOperations::test_get_store_file_count PASSED [ 62%]
+tests/test_database_service.py::TestFileUploadOperations::test_get_store_size PASSED [ 64%]
+tests/test_database_service.py::TestFileUploadOperations::test_get_store_modality_counts PASSED [ 65%]
+tests/test_database_service.py::TestFileUploadOperations::test_cascade_delete PASSED [ 66%]
+tests/test_database_service.py::TestSearchAnalytics::test_record_search PASSED [ 67%]
+tests/test_database_service.py::TestSearchAnalytics::test_get_search_stats PASSED [ 69%]
+tests/test_database_service.py::TestSystemAnalytics::test_get_system_stats PASSED [ 70%]
+tests/test_modality_detection.py::TestModalityDetection::test_text_formats PASSED [ 71%]
+tests/test_modality_detection.py::TestModalityDetection::test_image_formats PASSED [ 72%]
+tests/test_modality_detection.py::TestModalityDetection::test_video_formats PASSED [ 74%]
+tests/test_modality_detection.py::TestModalityDetection::test_audio_formats PASSED [ 75%]
+tests/test_modality_detection.py::TestModalityDetection::test_depth_formats PASSED [ 76%]
+tests/test_modality_detection.py::TestModalityDetection::test_thermal_formats PASSED [ 77%]
+tests/test_modality_detection.py::TestModalityDetection::test_imu_formats PASSED [ 79%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_text_file PASSED [ 80%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_image_file PASSED [ 81%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_video_file PASSED [ 82%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_audio_file PASSED [ 83%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_depth_file PASSED [ 85%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_thermal_file PASSED [ 86%]
+tests/test_modality_detection.py::TestModalityValidation::test_validate_imu_file PASSED [ 87%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_text_formats PASSED [ 88%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_image_formats PASSED [ 90%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_video_formats PASSED [ 91%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_audio_formats PASSED [ 92%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_depth_formats PASSED [ 93%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_thermal_formats PASSED [ 95%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_imu_formats PASSED [ 96%]
+tests/test_modality_detection.py::TestSupportedFormats::test_get_all_formats PASSED [ 97%]
+tests/test_modality_detection.py::TestFormatSupport::test_supported_formats PASSED [ 98%]
+tests/test_modality_detection.py::TestFormatSupport::test_unsupported_formats PASSED [100%]
+
+=================================== FAILURES ===================================
+____________________ TestFileUpload.test_upload_image_file _____________________
+tests/test_backend_comprehensive.py:76: in test_upload_image_file
+    assert file_path.exists(), f"Test file not found: {file_path}"
+E   AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_image.jpg
+E   assert False
+E    +  where False = exists()
+E    +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_image.jpg').exists
+____________________ TestFileUpload.test_upload_video_file _____________________
+tests/test_backend_comprehensive.py:92: in test_upload_video_file
+    assert file_path.exists(), f"Test file not found: {file_path}"
+E   AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_video.mp4
+E   assert False
+E    +  where False = exists()
+E    +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_video.mp4').exists
+____________________ TestFileUpload.test_upload_audio_file _____________________
+tests/test_backend_comprehensive.py:108: in test_upload_audio_file
+    assert file_path.exists(), f"Test file not found: {file_path}"
+E   AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_audio.wav
+E   assert False
+E    +  where False = exists()
+E    +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_audio.wav').exists
+__________________ TestVectorStores.test_create_vector_store ___________________
+tests/test_backend_comprehensive.py:167: in test_create_vector_store
+    assert result["modality"] == "text"
+E   AssertionError: assert None == 'text'
+_________________________ TestSearch.test_text_search __________________________
+tests/test_backend_comprehensive.py:337: in test_text_search
+    assert response.status_code == 200
+E   assert 422 == 200
+E    +  where 422 = <Response [422]>.status_code
+______________________ TestSearch.test_search_with_limit _______________________
+tests/test_backend_comprehensive.py:349: in test_search_with_limit
+    assert response.status_code == 200
+E   assert 422 == 200
+E    +  where 422 = <Response [422]>.status_code
+=========================== short test summary info ============================
+FAILED tests/test_backend_comprehensive.py::TestFileUpload::test_upload_image_file - AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_image.jpg
+assert False
+ +  where False = exists()
+ +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_image.jpg').exists
+FAILED tests/test_backend_comprehensive.py::TestFileUpload::test_upload_video_file - AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_video.mp4
+assert False
+ +  where False = exists()
+ +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_video.mp4').exists
+FAILED tests/test_backend_comprehensive.py::TestFileUpload::test_upload_audio_file - AssertionError: Test file not found: /Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_audio.wav
+assert False
+ +  where False = exists()
+ +    where exists = PosixPath('/Users/himanshuninawe/Work/Working/EMBEd/test_files/sample_audio.wav').exists
+FAILED tests/test_backend_comprehensive.py::TestVectorStores::test_create_vector_store - AssertionError: assert None == 'text'
+FAILED tests/test_backend_comprehensive.py::TestSearch::test_text_search - assert 422 == 200
+ +  where 422 = <Response [422]>.status_code
+FAILED tests/test_backend_comprehensive.py::TestSearch::test_search_with_limit - assert 422 == 200
+ +  where 422 = <Response [422]>.status_code
+================== 6 failed, 75 passed, 29 warnings in 10.09s ==================
