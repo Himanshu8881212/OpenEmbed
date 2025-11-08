@@ -1,0 +1,1 @@
+Sample IMU data: Accelerometer and gyroscope readings from a walking motion

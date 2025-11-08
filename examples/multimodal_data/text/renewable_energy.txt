@@ -1,0 +1,11 @@
+Renewable Energy Sources
+
+Renewable energy comes from naturally replenishing sources.
+Main types:
+- Solar: Energy from sunlight using photovoltaic panels
+- Wind: Turbines convert wind kinetic energy to electricity
+- Hydro: Water flow generates power
+- Geothermal: Heat from Earth's core
+- Biomass: Organic materials for fuel
+
+Renewables are crucial for reducing carbon emissions and combating climate change.

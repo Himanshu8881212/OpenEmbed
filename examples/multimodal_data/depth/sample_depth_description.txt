@@ -1,0 +1,1 @@
+Sample depth map: 3D scan of a room showing furniture and walls

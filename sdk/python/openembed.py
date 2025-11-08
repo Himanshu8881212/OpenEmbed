@@ -122,27 +122,28 @@ class OpenEmbedClient:
     ) -> List[Dict[str, Any]]:
         """
         Search using text query.
-        
+
         Args:
             vector_store: Name of vector store
             text: Text query
             n_results: Number of results (default: 10)
             modality_filter: Filter by modality
             include_metadata: Include metadata (default: True)
-        
+
         Returns:
             List of search results
         """
         payload = {
-            "vector_store": vector_store,
-            "text": text,
+            "vector_store_name": vector_store,
+            "query_modality": "text",
+            "query_text": text,
             "n_results": n_results,
             "include_metadata": include_metadata
         }
         if modality_filter:
             payload["filter_modality"] = modality_filter
-        
-        response = self._request("POST", "search-by-id", json=payload)
+
+        response = self._request("POST", "/search-by-id", json=payload)
         return response.get('results', [])
     
     def search_by_file(
