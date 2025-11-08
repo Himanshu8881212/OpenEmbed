@@ -59,6 +59,30 @@ export const uploadFile = async (
   return response.data;
 };
 
+// Upload multiple files from folder (auto-detect modality)
+export const uploadFolder = async (
+  files: File[],
+  vectorStore: string,
+  createNew: boolean = false
+): Promise<any> => {
+  const formData = new FormData();
+
+  // Append all files
+  files.forEach(file => {
+    formData.append('files', file);
+  });
+
+  formData.append('vector_store', vectorStore);
+  formData.append('create_new', createNew.toString());
+
+  const response = await api.post('/api/embed-folder', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return response.data;
+};
+
 // Delete a vector store
 export const deleteVectorStore = async (storeName: string): Promise<void> => {
   await api.delete(`/api/vector-stores/${storeName}`);

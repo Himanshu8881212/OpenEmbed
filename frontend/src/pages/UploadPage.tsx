@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   Box,
@@ -27,8 +27,9 @@ import {
   Close,
   CheckCircle,
   Delete,
+  FolderOpen,
 } from '@mui/icons-material';
-import { uploadFile, getVectorStores, VectorStore } from '../services/api';
+import { uploadFile, uploadFolder, getVectorStores, VectorStore } from '../services/api';
 
 const modalityExtensions: { [key: string]: string[] } = {
   text: ['.txt', '.md', '.json', '.csv'],
@@ -64,6 +65,7 @@ const UploadPage: React.FC = () => {
     severity: 'success',
   });
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadVectorStores();
@@ -139,21 +141,42 @@ const UploadPage: React.FC = () => {
 
     try {
       const storeName = createNew ? newStoreName : selectedStore;
-      const totalFiles = files.length;
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const modality = detectModality(file.name);
+      // Use folder upload API if multiple files (more efficient)
+      if (files.length > 5) {
+        const result = await uploadFolder(files, storeName, createNew);
 
-        await uploadFile(file, modality, storeName, createNew && i === 0);
-        setProgress(((i + 1) / totalFiles) * 100);
+        if (result.failed && result.failed.length > 0) {
+          setSnackbar({
+            open: true,
+            message: `Uploaded ${result.successful}/${result.total_files} files. ${result.failed_count} failed.`,
+            severity: 'error',
+          });
+        } else {
+          setSnackbar({
+            open: true,
+            message: `Successfully uploaded ${result.successful} file(s) to ${storeName}`,
+            severity: 'success',
+          });
+        }
+      } else {
+        // Use individual upload for small batches
+        const totalFiles = files.length;
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const modality = detectModality(file.name);
+
+          await uploadFile(file, modality, storeName, createNew && i === 0);
+          setProgress(((i + 1) / totalFiles) * 100);
+        }
+
+        setSnackbar({
+          open: true,
+          message: `Successfully uploaded ${files.length} file(s) to ${storeName}`,
+          severity: 'success',
+        });
       }
-
-      setSnackbar({
-        open: true,
-        message: `Successfully uploaded ${files.length} file(s) to ${storeName}`,
-        severity: 'success',
-      });
 
       setFiles([]);
       setDialogOpen(false);
@@ -177,13 +200,73 @@ const UploadPage: React.FC = () => {
     setFiles(files.filter((_, i) => i !== index));
   };
 
+  const handleFolderSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = event.target.files;
+    if (selectedFiles) {
+      const fileArray = Array.from(selectedFiles);
+
+      // Validate file formats
+      const validFiles: File[] = [];
+      const invalidFiles: string[] = [];
+
+      fileArray.forEach((file) => {
+        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+        const modality = detectModality(file.name);
+        const allowedExtensions = modalityExtensions[modality] || [];
+
+        if (allowedExtensions.includes(ext)) {
+          validFiles.push(file);
+        } else {
+          invalidFiles.push(file.name);
+        }
+      });
+
+      if (invalidFiles.length > 0) {
+        setSnackbar({
+          open: true,
+          message: `${invalidFiles.length} file(s) skipped (unsupported format)`,
+          severity: 'error',
+        });
+      }
+
+      if (validFiles.length > 0) {
+        setFiles(validFiles);
+        setDialogOpen(true);
+      }
+    }
+  };
+
+  const handleFolderUploadClick = () => {
+    folderInputRef.current?.click();
+  };
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4, borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+      <Box sx={{ mb: 4, borderBottom: '1px solid', borderColor: 'divider', pb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Upload
         </Typography>
+        <Button
+          variant="outlined"
+          startIcon={<FolderOpen />}
+          onClick={handleFolderUploadClick}
+          sx={{ borderColor: 'divider' }}
+        >
+          Upload Folder
+        </Button>
       </Box>
+
+      {/* Hidden folder input */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        /* @ts-ignore */
+        webkitdirectory=""
+        directory=""
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleFolderSelect}
+      />
 
       <Paper
         {...getRootProps()}

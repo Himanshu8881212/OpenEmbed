@@ -245,6 +245,138 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/embed-folder")
+async def embed_folder(
+    files: list[UploadFile] = File(...),
+    vector_store: str = Form(...),
+    create_new: bool = Form(False)
+):
+    """Upload multiple files from a folder and generate embeddings."""
+    try:
+        # Create vector store if requested
+        if create_new:
+            if not chroma_service.collection_exists(vector_store):
+                chroma_service.create_collection(
+                    name=vector_store,
+                    description=f"Multi-modal vector store"
+                )
+
+        # Check if vector store exists
+        if not chroma_service.collection_exists(vector_store):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
+            )
+
+        results = []
+        failed = []
+
+        for file in files:
+            try:
+                # Auto-detect modality from file extension
+                modality_detector = ModalityDetector()
+                detected_modality = modality_detector.detect_modality(file.filename)
+
+                if not detected_modality:
+                    failed.append({
+                        'filename': file.filename,
+                        'error': 'Could not detect modality from file extension'
+                    })
+                    continue
+
+                modality = detected_modality.value
+
+                # Save file
+                modality_type = ModalityType(modality)
+                result = await file_handler.save_upload_file(file, modality_type)
+                if not result:
+                    failed.append({
+                        'filename': file.filename,
+                        'error': 'Failed to save file'
+                    })
+                    continue
+
+                file_id, file_path = result
+
+                # Generate embedding
+                embedding = None
+                if modality == 'text':
+                    content = file_path.read_text()
+                    embedding = imagebind_service.generate_text_embedding(content)
+                elif modality == 'image':
+                    embedding = imagebind_service.generate_image_embedding(str(file_path))
+                elif modality == 'video':
+                    embedding = imagebind_service.generate_video_embedding(str(file_path))
+                elif modality == 'audio':
+                    embedding = imagebind_service.generate_audio_embedding(str(file_path))
+                elif modality == 'depth':
+                    embedding = imagebind_service.generate_depth_embedding(str(file_path))
+                elif modality == 'thermal':
+                    embedding = imagebind_service.generate_thermal_embedding(str(file_path))
+                elif modality == 'imu':
+                    embedding = imagebind_service.generate_imu_embedding(str(file_path))
+
+                if embedding is None:
+                    failed.append({
+                        'filename': file.filename,
+                        'error': f'Failed to generate embedding for modality: {modality}'
+                    })
+                    continue
+
+                # Store embedding
+                metadata = {
+                    'file_id': file_id,
+                    'modality': modality,
+                    'filename': file.filename,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+
+                embedding_id = chroma_service.add_embedding(
+                    collection_name=vector_store,
+                    embedding=embedding,
+                    modality=modality,
+                    metadata=metadata
+                )
+
+                if embedding_id:
+                    results.append({
+                        'filename': file.filename,
+                        'modality': modality,
+                        'embedding_id': embedding_id,
+                        'file_id': file_id
+                    })
+                else:
+                    failed.append({
+                        'filename': file.filename,
+                        'error': 'Failed to store embedding'
+                    })
+
+            except Exception as e:
+                failed.append({
+                    'filename': file.filename,
+                    'error': str(e)
+                })
+
+        return {
+            "success": len(results) > 0,
+            "message": f"Processed {len(results)}/{len(files)} files successfully",
+            "vector_store": vector_store,
+            "results": results,
+            "failed": failed,
+            "total_files": len(files),
+            "successful": len(results),
+            "failed_count": len(failed)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error embedding folder: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/embed")
 async def embed_file(
     file: UploadFile = File(...),
@@ -307,6 +439,7 @@ async def embed_file(
 
         # Store embedding
         metadata = {
+            'file_id': file_id,
             'modality': modality,
             'filename': file.filename,
             'timestamp': datetime.utcnow().isoformat()
