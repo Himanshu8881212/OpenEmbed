@@ -3,8 +3,11 @@ Main FastAPI application entry point.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import os
+from pathlib import Path
 
 from app.core.config import settings
 from app.core.logger import app_logger as logger
@@ -74,23 +77,39 @@ app.add_middleware(
 # Include API routes
 app.include_router(router, prefix="/api", tags=["API"])
 
+# Serve frontend static files (if they exist)
+frontend_build_path = Path(__file__).parent.parent / "frontend" / "build"
+if frontend_build_path.exists():
+    # Mount static files (JS, CSS, images, etc.)
+    app.mount("/static", StaticFiles(directory=str(frontend_build_path / "static")), name="static")
 
-@app.get("/")
-async def root():
-    """API root endpoint."""
-    return {
-        "message": "OpenEmbed API - Multi-Modal Embedding Application",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "api_prefix": "/api",
-        "modalities": ["text", "image", "video", "audio", "depth", "thermal", "imu"]
-    }
+    # Serve index.html for all non-API routes (SPA routing)
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve frontend application for all non-API routes."""
+        # Don't serve frontend for API routes or docs
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path == "openapi.json":
+            return {"error": "Not found"}
 
+        # Serve index.html for all other routes (React Router will handle routing)
+        index_path = frontend_build_path / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
 
-@app.get("/docs-redirect")
-async def docs_redirect():
-    """Redirect to API documentation."""
-    return {"message": "Visit /docs for API documentation"}
+        return {"error": "Frontend not built"}
+else:
+    # Fallback if frontend is not built
+    @app.get("/")
+    async def root():
+        """API root endpoint."""
+        return {
+            "message": "OpenEmbed API - Multi-Modal Embedding Application",
+            "version": "1.0.0",
+            "docs": "/docs",
+            "api_prefix": "/api",
+            "modalities": ["text", "image", "video", "audio", "depth", "thermal", "imu"],
+            "note": "Frontend not available. Build frontend or access API at /api"
+        }
 
 
 if __name__ == "__main__":

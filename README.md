@@ -21,14 +21,36 @@ OpenEmbed is a professional embedding warehouse that enables you to store, searc
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 🐳 Docker Installation (Recommended - Easiest!)
 
+**Prerequisites**: Docker Desktop ([Download](https://www.docker.com/products/docker-desktop))
+
+```bash
+# Clone repository
+git clone https://github.com/Himanshu8881212/EMBEd.git
+cd EMBEd
+
+# Start with one command!
+docker-compose up -d
+
+# Or use the interactive script
+./start.sh        # Linux/Mac
+start.bat         # Windows
+```
+
+**Access**: http://localhost:8000
+
+**That's it!** 🎉 See [DOCKER_INSTALL.md](DOCKER_INSTALL.md) for detailed instructions.
+
+---
+
+### 💻 Manual Installation (Advanced)
+
+**Prerequisites**:
 - Python 3.9+
 - Node.js 16+
 - 8GB+ RAM
 - (Optional) CUDA-capable GPU
-
-### Installation
 
 ```bash
 # Clone repository
@@ -46,7 +68,7 @@ npm install
 cd ..
 ```
 
-### Running
+### Running (Manual)
 
 ```bash
 # Terminal 1: Start backend
