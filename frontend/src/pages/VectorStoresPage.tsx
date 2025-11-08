@@ -157,7 +157,12 @@ const VectorStoresPage: React.FC = () => {
       ) : (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }, gap: 2 }}>
           {vectorStores.map((store) => {
-            const modality = store.modality?.toLowerCase() || 'unknown';
+            // Get modalities from metadata.modality_counts
+            const modalityCounts = store.metadata?.modality_counts || {};
+            const modalities = Object.keys(modalityCounts);
+            const modalityDisplay = modalities.length > 0
+              ? modalities.join(', ').toLowerCase()
+              : (store.modality?.toLowerCase() || 'unknown');
 
             return (
               <Card
@@ -175,7 +180,7 @@ const VectorStoresPage: React.FC = () => {
                     {store.name}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {modality}
+                    {modalityDisplay}
                   </Typography>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Box>
