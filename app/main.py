@@ -1,18 +1,15 @@
 """
 Main FastAPI application entry point.
 """
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
 import os
 
 from app.core.config import settings
 from app.core.logger import app_logger as logger
 from app.api.routes import router
-from app.services import languagebind_service, chroma_service
+from app.services import imagebind_service, chroma_service
 
 
 @asynccontextmanager
@@ -22,13 +19,11 @@ async def lifespan(app: FastAPI):
     Initialize services on startup and cleanup on shutdown.
     """
     # Startup
-    logger.info("Starting openEmbed application...")
+    logger.info("Starting OpenEmbed application...")
 
     # Create necessary directories
     settings.create_directories()
     os.makedirs("logs", exist_ok=True)
-    os.makedirs("static", exist_ok=True)
-    os.makedirs("templates", exist_ok=True)
 
     # Initialize ChromaDB
     logger.info("Initializing ChromaDB...")
@@ -37,12 +32,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ChromaDB initialized successfully")
 
-    # Initialize LanguageBind
-    logger.info("Initializing LanguageBind (this may take a while on first run)...")
-    if not languagebind_service.initialize():
-        logger.error("Failed to initialize LanguageBind")
+    # Initialize embedding service
+    logger.info("Initializing embedding service (this may take a while on first run)...")
+    if not imagebind_service.initialize():
+        logger.error("Failed to initialize embedding service")
     else:
-        logger.info("LanguageBind initialized successfully")
+        logger.info("Embedding service initialized successfully")
 
     logger.info("Application startup complete")
 
@@ -54,8 +49,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="openEmbed - Multi-Modal Embedding Application",
-    description="A professional application for generating embeddings from multiple modalities using LanguageBind",
+    title="OpenEmbed - Multi-Modal Embedding Application",
+    description="A professional application for generating embeddings from multiple modalities including text, image, video, audio, depth, thermal, and IMU data",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -69,23 +64,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Setup templates
-templates = Jinja2Templates(directory="templates")
-
 # Include API routes
 app.include_router(router, prefix="/api", tags=["API"])
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    """Serve the main application page."""
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "app_name": settings.app_name}
-    )
+@app.get("/")
+async def root():
+    """API root endpoint."""
+    return {
+        "message": "OpenEmbed API - Multi-Modal Embedding Application",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "api_prefix": "/api",
+        "modalities": ["text", "image", "video", "audio", "depth", "thermal", "imu"]
+    }
 
 
 @app.get("/docs-redirect")

@@ -66,6 +66,15 @@ class ModalityDetector:
             if ModalityType.THERMAL not in self.extension_to_modalities[ext_lower]:
                 self.extension_to_modalities[ext_lower].append(ModalityType.THERMAL)
 
+        # IMU formats (sensor data formats)
+        for ext in settings.allowed_imu_formats:
+            ext_lower = ext.lower()
+            if ext_lower not in self.extension_to_modalities:
+                self.extension_to_modalities[ext_lower] = []
+            # Add IMU only if not already in the list
+            if ModalityType.IMU not in self.extension_to_modalities[ext_lower]:
+                self.extension_to_modalities[ext_lower].append(ModalityType.IMU)
+
         total_mappings = sum(len(modalities) for modalities in self.extension_to_modalities.values())
         logger.info(f"Initialized ModalityDetector with {total_mappings} format mappings across {len(self.extension_to_modalities)} extensions")
     
@@ -112,10 +121,10 @@ class ModalityDetector:
     def get_supported_formats(self, modality: ModalityType) -> List[str]:
         """
         Get list of supported formats for a modality.
-        
+
         Args:
             modality: Type of modality
-            
+
         Returns:
             List of supported file extensions
         """
@@ -126,14 +135,15 @@ class ModalityDetector:
             ModalityType.IMAGE: settings.allowed_image_formats,
             ModalityType.DEPTH: settings.allowed_depth_formats,
             ModalityType.THERMAL: settings.allowed_thermal_formats,
+            ModalityType.IMU: settings.allowed_imu_formats,
         }
-        
+
         return format_map.get(modality, [])
     
     def get_all_supported_formats(self) -> Dict[str, List[str]]:
         """
         Get all supported formats for all modalities.
-        
+
         Returns:
             Dictionary mapping modality name to list of supported extensions
         """
@@ -144,6 +154,7 @@ class ModalityDetector:
             "image": settings.allowed_image_formats,
             "depth": settings.allowed_depth_formats,
             "thermal": settings.allowed_thermal_formats,
+            "imu": settings.allowed_imu_formats,
         }
     
     def is_format_supported(self, filename: str) -> bool:

@@ -15,6 +15,19 @@ class ModalityType(str, Enum):
     AUDIO = "audio"
     DEPTH = "depth"
     THERMAL = "thermal"
+    IMU = "imu"
+
+
+# Supported file formats for each modality
+MODALITY_FILE_FORMATS = {
+    "text": [".txt", ".md", ".json", ".csv"],
+    "image": [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"],
+    "video": [".mp4", ".avi", ".mov", ".mkv", ".webm"],
+    "audio": [".wav", ".mp3", ".flac", ".m4a", ".ogg"],
+    "depth": [".png", ".jpg", ".jpeg", ".tiff"],
+    "thermal": [".png", ".jpg", ".jpeg", ".tiff"],
+    "imu": [".csv", ".json", ".txt"]
+}
 
 
 class VectorStoreOperation(str, Enum):
@@ -42,8 +55,10 @@ class VectorStoreInfo(BaseModel):
     name: str
     description: Optional[str]
     count: int
+    modality: Optional[str] = None
     created_at: Optional[datetime]
     metadata: Optional[Dict[str, Any]]
+    size_bytes: Optional[int] = 0
 
 
 class VectorStoreList(BaseModel):
@@ -93,14 +108,14 @@ class SearchRequest(BaseModel):
     n_results: int = Field(default=10, ge=1, le=100)
     include_metadata: bool = Field(default=True)
 
-    @validator('query_file_id', always=True)
+    @validator('include_metadata', always=True)
     def validate_query(cls, v, values):
         """Ensure either file_id or text is provided."""
         if values.get('query_modality') == ModalityType.TEXT:
             if not values.get('query_text'):
                 raise ValueError('query_text is required for text modality')
         else:
-            if not v:
+            if not values.get('query_file_id'):
                 raise ValueError('query_file_id is required for non-text modalities')
         return v
 

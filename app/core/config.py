@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
     # Application
-    app_name: str = Field(default="EMBEd", env="APP_NAME")
+    app_name: str = Field(default="OpenEmbed", env="APP_NAME")
     app_version: str = Field(default="1.0.0", env="APP_VERSION")
     debug: bool = Field(default=False, env="DEBUG")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -73,6 +73,13 @@ class Settings(BaseSettings):
         env="ALLOWED_THERMAL_FORMATS"
     )
 
+    # IMU (Inertial Measurement Unit) formats - sensor data formats
+    # IMU data typically contains accelerometer and gyroscope measurements
+    allowed_imu_formats: List[str] = Field(
+        default=[".csv", ".json", ".npy", ".npz", ".pkl", ".h5", ".hdf5"],
+        env="ALLOWED_IMU_FORMATS"
+    )
+
     # Security
     secret_key: str = Field(default="change-me-in-production", env="SECRET_KEY")
     cors_origins: List[str] = Field(
@@ -91,7 +98,7 @@ class Settings(BaseSettings):
         def parse_env_var(cls, field_name: str, raw_val: str):
             if field_name in ['allowed_text_formats', 'allowed_video_formats', 'allowed_audio_formats',
                              'allowed_image_formats', 'allowed_depth_formats',
-                             'allowed_thermal_formats', 'cors_origins']:
+                             'allowed_thermal_formats', 'allowed_imu_formats', 'cors_origins']:
                 return [x.strip() for x in raw_val.split(',')]
             return raw_val
 

@@ -1,41 +1,44 @@
-# openEmbed - Multi-Modal Embedding Application
+# OpenEmbed - Multi-Modal Embedding Application
 
-A professional, production-ready application for generating embeddings from multiple modalities (text, image, video, audio, depth maps, and thermal images) using LanguageBind and storing them in ChromaDB vector store.
+A professional, production-ready application for generating embeddings from multiple modalities using Meta's ImageBind and storing them in ChromaDB vector store.
 
 ## Features
 
-- **6 Modality Support**: Generate embeddings from text, images, videos, audio files, depth maps, and thermal images
-- **LanguageBind Integration**: State-of-the-art multi-modal embeddings using LanguageBind (ICLR 2024)
+- **7 Modality Support**: Generate embeddings from text, images, videos, audio files, depth maps, thermal images, and IMU data
+- **ImageBind Integration**: State-of-the-art multi-modal embeddings using Meta's ImageBind (CVPR 2023)
 - **Vector Storage**: Persistent storage using ChromaDB
 - **RESTful API**: FastAPI-based backend with comprehensive API endpoints
-- **Modern Web UI**: Intuitive web interface for file uploads and vector store management
-- **Production Ready**: Docker support, logging, error handling, and monitoring
-- **Similarity Search**: Cross-modal and intra-modal similarity search capabilities
+- **Modern Web UI**: Professional React + Material-UI interface
+- **Production Ready**: Logging, error handling, and monitoring
+- **Cross-Modal Search**: Search across different modalities in a unified embedding space
 
 ## Architecture
 
 ```
-openEmbed/
+OpenEmbed/
 ├── app/
 │   ├── api/                 # API routes and endpoints
 │   ├── core/                # Configuration and logging
 │   ├── models/              # Pydantic schemas
-│   ├── services/            # Business logic (LanguageBind, ChromaDB)
+│   ├── services/            # Business logic (ImageBind, ChromaDB)
 │   └── utils/               # Utility functions
-├── static/                  # Frontend assets (CSS, JS)
-├── templates/               # HTML templates
-├── tests/                   # Test suite
-└── docker/                  # Docker configuration
+├── frontend/                # React + TypeScript frontend
+│   ├── src/
+│   │   ├── components/      # Reusable components
+│   │   └── pages/           # Page components
+│   └── public/              # Static assets
+└── demo_files/              # Sample files for testing
 ```
 
 ## Supported Modalities
 
-1. **Text**: Plain text content
-2. **Image**: JPG, PNG, BMP images
-3. **Video**: MP4, AVI, MOV, MKV videos
-4. **Audio**: WAV, MP3, FLAC, M4A audio files
-5. **Depth**: PNG, NPY depth maps
-6. **Thermal**: JPG, PNG thermal images
+1. **Text**: Plain text content (.txt, .md, .json, .pdf, .doc, .docx)
+2. **Image**: Images (.jpg, .png, .bmp, .gif, .tiff, .webp, .svg)
+3. **Video**: Videos (.mp4, .avi, .mov, .mkv, .webm, .flv, .wmv)
+4. **Audio**: Audio files (.wav, .mp3, .flac, .m4a, .aac, .ogg, .opus)
+5. **Depth**: Depth maps (.png, .npy, .npz, .exr, .pfm)
+6. **Thermal**: Thermal images (.jpg, .png, .tiff)
+7. **IMU**: Inertial measurement data (.csv, .json, .npy, .npz, .pkl, .h5)
 
 ## Installation
 
@@ -63,7 +66,6 @@ openEmbed/
 3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
-   pip install git+https://github.com/PKU-YuanGroup/LanguageBind.git
    ```
 
 4. **Configure environment**:
@@ -72,13 +74,20 @@ openEmbed/
    # Edit .env with your settings
    ```
 
-5. **Run the application**:
+5. **Run the backend**:
    ```bash
-   python -m app.main
+   uvicorn app.main:app --reload
    ```
 
-6. **Access the application**:
-   - Web UI: http://localhost:8000
+6. **Run the frontend** (in a new terminal):
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+
+7. **Access the application**:
+   - Web UI: http://localhost:3000
    - API Docs: http://localhost:8000/docs
 
 ### Option 2: Docker Deployment
@@ -204,17 +213,16 @@ MAX_FILE_SIZE=500000000  # 500MB
 UPLOAD_DIR=./uploads
 ```
 
-## LanguageBind Models
+## ImageBind Model
 
-The application automatically downloads and caches the following models on first run:
+The application automatically downloads and caches the ImageBind model on first run:
 
-- **LanguageBind_Image**: Image encoder
-- **LanguageBind_Video_FT**: Video encoder (fine-tuned)
-- **LanguageBind_Audio_FT**: Audio encoder (fine-tuned)
-- **LanguageBind_Depth**: Depth map encoder
-- **LanguageBind_Thermal**: Thermal image encoder
+- **ImageBind Huge**: Unified multi-modal encoder (~4.5GB)
+  - Single model for all 7 modalities
+  - Shared embedding space (1024 dimensions)
+  - Trained on image-paired data across modalities
 
-Models are cached in `cache_dir` (configurable).
+Models are cached in `~/.cache/torch/hub/checkpoints/`.
 
 ## Performance Considerations
 
@@ -309,20 +317,22 @@ This project is licensed under the MIT License.
 
 ## Acknowledgments
 
-- **LanguageBind**: [PKU-YuanGroup/LanguageBind](https://github.com/PKU-YuanGroup/LanguageBind)
+- **ImageBind**: [facebookresearch/ImageBind](https://github.com/facebookresearch/ImageBind)
 - **ChromaDB**: [chroma-core/chroma](https://github.com/chroma-core/chroma)
 - **FastAPI**: [tiangolo/fastapi](https://github.com/tiangolo/fastapi)
+- **React**: [facebook/react](https://github.com/facebook/react)
+- **Material-UI**: [mui/material-ui](https://github.com/mui/material-ui)
 
 ## Citation
 
-If you use this application in your research, please cite LanguageBind:
+If you use this application in your research, please cite ImageBind:
 
 ```bibtex
-@inproceedings{languagebind,
-  title={LanguageBind: Extending Video-Language Pretraining to N-modality by Language-based Semantic Alignment},
-  author={Zhu, Bin and Lin, Bin and Ning, Munan and Yan, Yang and Cui, Jiaxi and Wang, HongFa and Pang, Yatian and Jiang, Wenhao and Zhang, Junwu and Li, Zongwei and others},
-  booktitle={International Conference on Learning Representations},
-  year={2024}
+@inproceedings{girdhar2023imagebind,
+  title={ImageBind: One Embedding Space To Bind Them All},
+  author={Girdhar, Rohit and El-Nouby, Alaaeldin and Liu, Zhuang and Singh, Mannat and Alwala, Kalyan Vasudev and Joulin, Armand and Misra, Ishan},
+  booktitle={CVPR},
+  year={2023}
 }
 ```
 

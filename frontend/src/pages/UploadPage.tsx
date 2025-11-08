@@ -11,7 +11,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Chip,
   LinearProgress,
   Alert,
   Snackbar,
@@ -20,37 +19,25 @@ import {
   DialogContent,
   DialogActions,
   IconButton,
+  Chip,
+  alpha,
 } from '@mui/material';
 import {
   CloudUpload,
-  Image,
-  VideoLibrary,
-  AudioFile,
-  Thermostat,
-  Layers,
-  TextFields,
   Close,
   CheckCircle,
+  Delete,
 } from '@mui/icons-material';
-import { motion } from 'framer-motion';
 import { uploadFile, getVectorStores, VectorStore } from '../services/api';
 
-const modalityIcons: { [key: string]: React.ReactElement } = {
-  image: <Image />,
-  video: <VideoLibrary />,
-  audio: <AudioFile />,
-  thermal: <Thermostat />,
-  depth: <Layers />,
-  text: <TextFields />,
-};
-
 const modalityExtensions: { [key: string]: string[] } = {
-  text: ['.txt'],
-  image: ['.jpg', '.jpeg', '.png', '.bmp'],
-  video: ['.mp4', '.avi', '.mov', '.mkv'],
-  audio: ['.wav', '.mp3', '.flac', '.m4a'],
-  thermal: ['.jpg', '.jpeg', '.png'],
-  depth: ['.png', '.npy'],
+  text: ['.txt', '.md', '.json', '.csv'],
+  image: ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'],
+  video: ['.mp4', '.avi', '.mov', '.mkv', '.webm'],
+  audio: ['.wav', '.mp3', '.flac', '.m4a', '.ogg'],
+  depth: ['.png', '.jpg', '.jpeg', '.tiff'],
+  thermal: ['.png', '.jpg', '.jpeg', '.tiff'],
+  imu: ['.csv', '.json', '.txt'],
 };
 
 const detectModality = (filename: string): string => {
@@ -92,16 +79,48 @@ const UploadPage: React.FC = () => {
     }
   };
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    setFiles(acceptedFiles);
-    if (acceptedFiles.length > 0) {
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+    // Validate file formats
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    acceptedFiles.forEach((file) => {
+      const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+      const modality = detectModality(file.name);
+      const allowedExtensions = modalityExtensions[modality] || [];
+
+      if (allowedExtensions.includes(ext)) {
+        validFiles.push(file);
+      } else {
+        invalidFiles.push(`${file.name} (not a valid ${modality} file)`);
+      }
+    });
+
+    if (invalidFiles.length > 0) {
+      setSnackbar({
+        open: true,
+        message: `Invalid files rejected: ${invalidFiles.join(', ')}`,
+        severity: 'error',
+      });
+    }
+
+    setFiles(validFiles);
+    if (validFiles.length > 0) {
       setDialogOpen(true);
     }
   }, []);
 
+
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     multiple: true,
+    accept: {
+      'text/*': modalityExtensions.text,
+      'image/*': modalityExtensions.image,
+      'video/*': modalityExtensions.video,
+      'audio/*': modalityExtensions.audio,
+    },
   });
 
   const handleUpload = async () => {
@@ -159,63 +178,73 @@ const UploadPage: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ py: 8 }}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-      >
-        <Typography variant="h2" gutterBottom sx={{ mb: 2, fontWeight: 300 }}>
-          Upload Files
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Box sx={{ mb: 4, borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+        <Typography variant="h4" sx={{ fontWeight: 600 }}>
+          Upload
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 6 }}>
-          Drag and drop your files to automatically detect the modality and embed them into a vector store
+      </Box>
+
+      <Paper
+        {...getRootProps()}
+        sx={{
+          p: 6,
+          textAlign: 'center',
+          cursor: 'pointer',
+          border: '2px dashed',
+          borderColor: isDragActive ? 'text.primary' : 'divider',
+          bgcolor: 'background.paper',
+        }}
+        elevation={0}
+      >
+        <input {...getInputProps()} />
+        <CloudUpload sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+          {isDragActive ? 'Drop files here' : 'Drop files or click to browse'}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          All modalities supported
         </Typography>
 
-        <Paper
-          {...getRootProps()}
-          sx={{
-            p: 8,
-            textAlign: 'center',
-            cursor: 'pointer',
-            border: '2px dashed',
-            borderColor: isDragActive ? 'primary.main' : 'divider',
-            bgcolor: isDragActive ? 'action.hover' : 'background.paper',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            '&:hover': {
-              borderColor: 'primary.main',
-              bgcolor: 'action.hover',
-              transform: 'scale(1.01)',
-            },
-          }}
-          elevation={isDragActive ? 8 : 2}
-        >
-          <input {...getInputProps()} />
-          <motion.div
-            animate={{ scale: isDragActive ? 1.1 : 1 }}
-            transition={{ duration: 0.2 }}
-          >
-            <CloudUpload sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
-          </motion.div>
-          <Typography variant="h5" gutterBottom>
-            {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
+        {/* Supported Formats Info */}
+        <Box sx={{ mt: 3, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5, fontWeight: 600 }}>
+            Supported Formats:
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            or click to browse
-          </Typography>
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
-            {Object.entries(modalityIcons).map(([modality, icon]) => (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
+            {Object.entries(modalityExtensions).map(([modality, extensions]) => (
               <Chip
                 key={modality}
-                icon={icon}
-                label={modality}
-                variant="outlined"
-                sx={{ textTransform: 'capitalize' }}
+                label={`${modality.toUpperCase()}: ${extensions.join(', ')}`}
+                size="small"
+                sx={{
+                  bgcolor: 'background.default',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  fontSize: '0.7rem',
+                }}
               />
             ))}
           </Box>
-        </Paper>
-      </motion.div>
+        </Box>
+
+        {files.length > 0 && (
+          <Box sx={{ mt: 3, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              {files.length} file{files.length > 1 ? 's' : ''} selected
+            </Typography>
+            <Button
+              variant="contained"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDialogOpen(true);
+              }}
+            >
+              Continue
+            </Button>
+          </Box>
+        )}
+      </Paper>
 
       {/* Upload Dialog */}
       <Dialog
@@ -227,6 +256,7 @@ const UploadPage: React.FC = () => {
           sx: {
             bgcolor: 'background.paper',
             backgroundImage: 'none',
+            borderRadius: 3,
           },
         }}
       >
@@ -243,19 +273,41 @@ const UploadPage: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle2" gutterBottom>
+            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
               Selected Files ({files.length})
             </Typography>
-            <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
-              {files.map((file, index) => (
-                <Chip
-                  key={index}
-                  label={`${file.name} (${detectModality(file.name)})`}
-                  onDelete={() => !uploading && removeFile(index)}
-                  icon={modalityIcons[detectModality(file.name)]}
-                  sx={{ m: 0.5 }}
-                />
-              ))}
+            <Box sx={{ maxHeight: 250, overflow: 'auto' }}>
+              {files.map((file, index) => {
+                const modality = detectModality(file.name);
+                return (
+                  <Paper
+                    key={index}
+                    sx={{
+                      p: 1.5,
+                      mb: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  >
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+                        {file.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {modality} • {(file.size / 1024).toFixed(2)} KB
+                      </Typography>
+                    </Box>
+                    {!uploading && (
+                      <IconButton size="small" onClick={() => removeFile(index)}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Paper>
+                );
+              })}
             </Box>
           </Box>
 
@@ -297,11 +349,28 @@ const UploadPage: React.FC = () => {
           )}
 
           {uploading && (
-            <Box sx={{ mt: 2 }}>
-              <LinearProgress variant="determinate" value={progress} />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
-                Uploading... {Math.round(progress)}%
-              </Typography>
+            <Box sx={{ mt: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  Uploading...
+                </Typography>
+                <Typography variant="body2" color="primary" sx={{ fontWeight: 600 }}>
+                  {Math.round(progress)}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={progress}
+                sx={{
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: alpha('#667eea', 0.1),
+                  '& .MuiLinearProgress-bar': {
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    borderRadius: 4,
+                  },
+                }}
+              />
             </Box>
           )}
         </DialogContent>
@@ -318,7 +387,7 @@ const UploadPage: React.FC = () => {
             {uploading ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
-      </Dialog>
+      </Dialog >
 
       <Snackbar
         open={snackbar.open}
@@ -329,7 +398,7 @@ const UploadPage: React.FC = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Container >
   );
 };
 

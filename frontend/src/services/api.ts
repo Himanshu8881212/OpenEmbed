@@ -12,7 +12,9 @@ const api = axios.create({
 export interface VectorStore {
   name: string;
   count: number;
+  modality?: string;
   metadata?: any;
+  size_bytes?: number;
 }
 
 export interface EmbeddedFile {

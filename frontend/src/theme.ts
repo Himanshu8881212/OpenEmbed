@@ -78,34 +78,34 @@ export const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 12,
+    borderRadius: 0, // Sharp edges
   },
   shadows: [
     'none',
-    '0px 2px 4px rgba(0,0,0,0.3)',
-    '0px 4px 8px rgba(0,0,0,0.3)',
-    '0px 6px 12px rgba(0,0,0,0.3)',
-    '0px 8px 16px rgba(0,0,0,0.3)',
-    '0px 10px 20px rgba(0,0,0,0.3)',
-    '0px 12px 24px rgba(0,0,0,0.3)',
-    '0px 14px 28px rgba(0,0,0,0.3)',
-    '0px 16px 32px rgba(0,0,0,0.3)',
-    '0px 18px 36px rgba(0,0,0,0.3)',
-    '0px 20px 40px rgba(0,0,0,0.3)',
-    '0px 22px 44px rgba(0,0,0,0.3)',
-    '0px 24px 48px rgba(0,0,0,0.3)',
-    '0px 26px 52px rgba(0,0,0,0.3)',
-    '0px 28px 56px rgba(0,0,0,0.3)',
-    '0px 30px 60px rgba(0,0,0,0.3)',
-    '0px 32px 64px rgba(0,0,0,0.3)',
-    '0px 34px 68px rgba(0,0,0,0.3)',
-    '0px 36px 72px rgba(0,0,0,0.3)',
-    '0px 38px 76px rgba(0,0,0,0.3)',
-    '0px 40px 80px rgba(0,0,0,0.3)',
-    '0px 42px 84px rgba(0,0,0,0.3)',
-    '0px 44px 88px rgba(0,0,0,0.3)',
-    '0px 46px 92px rgba(0,0,0,0.3)',
-    '0px 48px 96px rgba(0,0,0,0.3)',
+    '0px 1px 2px rgba(0,0,0,0.2)',
+    '0px 1px 3px rgba(0,0,0,0.2)',
+    '0px 1px 4px rgba(0,0,0,0.2)',
+    '0px 2px 4px rgba(0,0,0,0.2)',
+    '0px 2px 5px rgba(0,0,0,0.2)',
+    '0px 2px 6px rgba(0,0,0,0.2)',
+    '0px 3px 6px rgba(0,0,0,0.2)',
+    '0px 3px 7px rgba(0,0,0,0.2)',
+    '0px 3px 8px rgba(0,0,0,0.2)',
+    '0px 4px 8px rgba(0,0,0,0.2)',
+    '0px 4px 9px rgba(0,0,0,0.2)',
+    '0px 4px 10px rgba(0,0,0,0.2)',
+    '0px 5px 10px rgba(0,0,0,0.2)',
+    '0px 5px 11px rgba(0,0,0,0.2)',
+    '0px 5px 12px rgba(0,0,0,0.2)',
+    '0px 6px 12px rgba(0,0,0,0.2)',
+    '0px 6px 13px rgba(0,0,0,0.2)',
+    '0px 6px 14px rgba(0,0,0,0.2)',
+    '0px 7px 14px rgba(0,0,0,0.2)',
+    '0px 7px 15px rgba(0,0,0,0.2)',
+    '0px 7px 16px rgba(0,0,0,0.2)',
+    '0px 8px 16px rgba(0,0,0,0.2)',
+    '0px 8px 17px rgba(0,0,0,0.2)',
+    '0px 8px 18px rgba(0,0,0,0.2)',
   ],
   components: {
     MuiButton: {
@@ -113,13 +113,9 @@ export const theme = createTheme({
         root: {
           textTransform: 'none',
           fontWeight: 500,
-          borderRadius: 8,
+          borderRadius: 0, // Sharp edges
           padding: '10px 24px',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: '0px 8px 16px rgba(0,0,0,0.4)',
-          },
+          transition: 'none', // No animations
         },
       },
     },
@@ -127,11 +123,8 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          '&:hover': {
-            transform: 'translateY(-4px)',
-            boxShadow: '0px 12px 24px rgba(0,0,0,0.4)',
-          },
+          borderRadius: 0, // Sharp edges
+          transition: 'none', // No animations
         },
       },
     },
@@ -139,13 +132,14 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
+          borderRadius: 0, // Sharp edges
         },
       },
     },
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 6,
+          borderRadius: 0, // Sharp edges
         },
       },
     },

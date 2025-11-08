@@ -23,11 +23,15 @@ import {
   Storage,
   Menu as MenuIcon,
   Close,
+  Dashboard,
+  Search,
 } from '@mui/icons-material';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { theme } from './theme';
+import HomePage from './pages/HomePage';
 import UploadPage from './pages/UploadPage';
 import VectorStoresPage from './pages/VectorStoresPage';
+import SearchPage from './pages/SearchPage';
 
 const Navigation: React.FC = () => {
   const location = useLocation();
@@ -36,8 +40,10 @@ const Navigation: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const navItems = [
-    { path: '/', label: 'Upload', icon: <CloudUpload /> },
-    { path: '/stores', label: 'Vector Stores', icon: <Storage /> },
+    { path: '/', label: 'Dashboard', icon: <Dashboard /> },
+    { path: '/upload', label: 'Upload', icon: <CloudUpload /> },
+    { path: '/stores', label: 'Stores', icon: <Storage /> },
+    { path: '/search', label: 'Search', icon: <Search /> },
   ];
 
   const NavButton: React.FC<{ path: string; label: string; icon: React.ReactElement }> = ({
@@ -52,22 +58,11 @@ const Navigation: React.FC = () => {
         to={path}
         startIcon={icon}
         sx={{
-          color: isActive ? 'primary.main' : 'text.secondary',
-          position: 'relative',
-          '&::after': {
-            content: '""',
-            position: 'absolute',
-            bottom: 0,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: isActive ? '80%' : '0%',
-            height: '2px',
-            bgcolor: 'primary.main',
-            transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          },
-          '&:hover::after': {
-            width: '80%',
-          },
+          color: isActive ? 'text.primary' : 'text.secondary',
+          fontWeight: isActive ? 600 : 400,
+          px: 2.5,
+          borderBottom: isActive ? '2px solid' : 'none',
+          borderColor: 'text.primary',
         }}
       >
         {label}
@@ -85,31 +80,25 @@ const Navigation: React.FC = () => {
           borderBottom: '1px solid',
           borderColor: 'divider',
           backdropFilter: 'blur(20px)',
-          backgroundColor: 'rgba(26, 26, 26, 0.8)',
+          backgroundColor: 'rgba(26, 26, 26, 0.95)',
         }}
       >
-        <Container maxWidth="lg">
-          <Toolbar disableGutters>
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5 }}
-            >
+        <Container maxWidth="xl">
+          <Toolbar disableGutters sx={{ minHeight: { xs: 64, md: 72 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Typography
-                variant="h5"
+                variant="h6"
                 component={Link}
                 to="/"
                 sx={{
-                  fontWeight: 300,
-                  letterSpacing: '0.1em',
+                  fontWeight: 600,
                   textDecoration: 'none',
-                  color: 'primary.main',
-                  mr: 4,
+                  color: 'text.primary',
                 }}
               >
-                openEmbed
+                OpenEmbed
               </Typography>
-            </motion.div>
+            </Box>
 
             {isMobile ? (
               <IconButton
@@ -120,7 +109,7 @@ const Navigation: React.FC = () => {
                 <MenuIcon />
               </IconButton>
             ) : (
-              <Box sx={{ display: 'flex', gap: 2, ml: 'auto' }}>
+              <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
                 {navItems.map((item) => (
                   <NavButton key={item.path} {...item} />
                 ))}
@@ -136,14 +125,14 @@ const Navigation: React.FC = () => {
         onClose={() => setDrawerOpen(false)}
         PaperProps={{
           sx: {
-            width: 250,
+            width: 280,
             bgcolor: 'background.paper',
           },
         }}
       >
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6">Menu</Typography>
-          <IconButton onClick={() => setDrawerOpen(false)}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Navigation</Typography>
+          <IconButton onClick={() => setDrawerOpen(false)} size="small">
             <Close />
           </IconButton>
         </Box>
@@ -155,9 +144,24 @@ const Navigation: React.FC = () => {
                 to={item.path}
                 onClick={() => setDrawerOpen(false)}
                 selected={location.pathname === item.path}
+                sx={{
+                  py: 1.5,
+                  '&.Mui-selected': {
+                    bgcolor: 'rgba(255, 255, 255, 0.08)',
+                    borderLeft: '3px solid',
+                    borderColor: 'primary.main',
+                  },
+                }}
               >
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
+                <ListItemIcon sx={{ color: location.pathname === item.path ? 'primary.main' : 'text.secondary' }}>
+                  {item.icon}
+                </ListItemIcon>
+                <ListItemText
+                  primary={item.label}
+                  primaryTypographyProps={{
+                    fontWeight: location.pathname === item.path ? 600 : 400
+                  }}
+                />
               </ListItemButton>
             </ListItem>
           ))}
@@ -168,16 +172,7 @@ const Navigation: React.FC = () => {
 };
 
 const PageTransition: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      transition={{ duration: 0.3 }}
-    >
-      {children}
-    </motion.div>
-  );
+  return <>{children}</>;
 };
 
 function App() {
@@ -189,10 +184,6 @@ function App() {
           sx={{
             minHeight: '100vh',
             bgcolor: 'background.default',
-            backgroundImage: `
-              radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 50%),
-              radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.02) 0%, transparent 50%)
-            `,
           }}
         >
           <Navigation />
@@ -202,7 +193,23 @@ function App() {
                 path="/"
                 element={
                   <PageTransition>
+                    <HomePage />
+                  </PageTransition>
+                }
+              />
+              <Route
+                path="/upload"
+                element={
+                  <PageTransition>
                     <UploadPage />
+                  </PageTransition>
+                }
+              />
+              <Route
+                path="/search"
+                element={
+                  <PageTransition>
+                    <SearchPage />
                   </PageTransition>
                 }
               />

@@ -2,8 +2,10 @@
 API routes for the EMBEd application.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi.responses import FileResponse
 from typing import Optional, List
 from datetime import datetime
+from pathlib import Path
 
 from app.models.schemas import (
     VectorStoreCreate,
@@ -20,7 +22,7 @@ from app.models.schemas import (
     ModalityType,
     VectorStoreOperation
 )
-from app.services import languagebind_service, chroma_service
+from app.services import imagebind_service, chroma_service
 from app.utils import file_handler, modality_detector
 from app.core.logger import app_logger as logger
 
@@ -33,7 +35,7 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        models_loaded=languagebind_service.is_initialized(),
+        models_loaded=imagebind_service.is_initialized(),
         vector_store_connected=chroma_service.is_initialized(),
         timestamp=datetime.utcnow()
     )
@@ -94,12 +96,31 @@ async def list_vector_stores():
 
         stores = []
         for col in collections:
+            # Calculate storage size for this store
+            size_bytes = 0
+            try:
+                items = chroma_service.get_all_items(col['name'])
+                if items and 'ids' in items and 'metadatas' in items:
+                    file_ids = []
+                    modalities = []
+                    for metadata in items.get('metadatas', []):
+                        if 'file_id' in metadata and 'modality' in metadata:
+                            file_ids.append(metadata['file_id'])
+                            modalities.append(metadata['modality'])
+
+                    if file_ids:
+                        size_bytes = file_handler.calculate_storage_size(file_ids, modalities)
+            except Exception as e:
+                logger.warning(f"Could not calculate size for store {col['name']}: {e}")
+
             stores.append(VectorStoreInfo(
                 name=col['name'],
                 description=col['metadata'].get('description'),
                 count=col['count'],
+                modality=col['metadata'].get('modality'),
                 created_at=datetime.fromisoformat(col['metadata'].get('created_at', datetime.utcnow().isoformat())),
-                metadata=col['metadata']
+                metadata=col['metadata'],
+                size_bytes=size_bytes
             ))
 
         return VectorStoreList(stores=stores, total=len(stores))
@@ -124,6 +145,7 @@ async def get_vector_store(name: str):
             name=info['name'],
             description=info['metadata'].get('description'),
             count=info['count'],
+            modality=info['metadata'].get('modality'),
             created_at=datetime.fromisoformat(info['metadata'].get('created_at', datetime.utcnow().isoformat())),
             metadata=info['metadata']
         )
@@ -148,17 +170,20 @@ async def get_vector_store_files(name: str):
         # Get all items from the collection
         items = chroma_service.get_all_items(name)
 
-        files = []
+        # Group by file_id to avoid duplicates (since each file has multiple chunks)
+        files_dict = {}
         for item_id, metadata in zip(items.get('ids', []), items.get('metadatas', [])):
-            files.append({
-                'id': item_id,
-                'filename': metadata.get('filename', 'unknown'),
-                'modality': metadata.get('modality', 'unknown'),
-                'timestamp': metadata.get('timestamp', datetime.utcnow().isoformat()),
-                'metadata': metadata
-            })
+            file_id = metadata.get('file_id', item_id)
+            if file_id not in files_dict:
+                files_dict[file_id] = {
+                    'id': file_id,
+                    'filename': metadata.get('filename', 'unknown'),
+                    'modality': metadata.get('modality', 'unknown'),
+                    'timestamp': metadata.get('timestamp', datetime.utcnow().isoformat()),
+                    'metadata': metadata
+                }
 
-        return files
+        return list(files_dict.values())
 
     except HTTPException:
         raise
@@ -260,17 +285,17 @@ async def embed_file(
         if modality == 'text':
             # Read text content
             content = file_path.read_text()
-            embedding = languagebind_service.generate_text_embedding(content)
+            embedding = imagebind_service.generate_text_embedding(content)
         elif modality == 'image':
-            embedding = languagebind_service.generate_image_embedding(str(file_path))
+            embedding = imagebind_service.generate_image_embedding(str(file_path))
         elif modality == 'video':
-            embedding = languagebind_service.generate_video_embedding(str(file_path))
+            embedding = imagebind_service.generate_video_embedding(str(file_path))
         elif modality == 'audio':
-            embedding = languagebind_service.generate_audio_embedding(str(file_path))
+            embedding = imagebind_service.generate_audio_embedding(str(file_path))
         elif modality == 'depth':
-            embedding = languagebind_service.generate_depth_embedding(str(file_path))
+            embedding = imagebind_service.generate_depth_embedding(str(file_path))
         elif modality == 'thermal':
-            embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+            embedding = imagebind_service.generate_thermal_embedding(str(file_path))
 
         if embedding is None:
             raise HTTPException(
@@ -350,7 +375,7 @@ async def generate_embedding(request: EmbeddingRequest):
                     status_code=400,
                     detail="Text content required for text modality"
                 )
-            embedding = languagebind_service.generate_embedding(
+            embedding = imagebind_service.generate_embedding(
                 modality='text',
                 text_content=request.text_content
             )
@@ -364,7 +389,7 @@ async def generate_embedding(request: EmbeddingRequest):
                 )
 
             # Generate embedding
-            embedding = languagebind_service.generate_embedding(
+            embedding = imagebind_service.generate_embedding(
                 modality=request.modality.value,
                 file_path=file_path
             )
@@ -411,9 +436,9 @@ async def generate_embedding(request: EmbeddingRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/search", response_model=SearchResponse)
+@router.post("/search-by-id", response_model=SearchResponse)
 async def search_similar(request: SearchRequest):
-    """Search for similar embeddings in a vector store."""
+    """Search for similar embeddings in a vector store using existing embedding ID or text."""
     try:
         # Check if vector store exists
         if not chroma_service.collection_exists(request.vector_store_name):
@@ -431,7 +456,7 @@ async def search_similar(request: SearchRequest):
                     status_code=400,
                     detail="Query text required for text modality"
                 )
-            query_embedding = languagebind_service.generate_embedding(
+            query_embedding = imagebind_service.generate_embedding(
                 modality='text',
                 text_content=request.query_text
             )
@@ -445,7 +470,7 @@ async def search_similar(request: SearchRequest):
                 )
 
             # Generate embedding
-            query_embedding = languagebind_service.generate_embedding(
+            query_embedding = imagebind_service.generate_embedding(
                 modality=request.query_modality.value,
                 file_path=file_path
             )
@@ -482,8 +507,9 @@ async def search_similar(request: SearchRequest):
         return SearchResponse(
             success=True,
             results=search_results,
-            query_modality=request.query_modality,
-            total_results=len(search_results)
+            query_modality=request.query_modality.value,
+            vector_store=request.vector_store_name,
+            n_results=len(search_results)
         )
 
     except HTTPException:
@@ -585,17 +611,17 @@ async def embed_file_auto(
         if modality == 'text':
             # Read text content
             content = file_path.read_text()
-            embedding = languagebind_service.generate_text_embedding(content)
+            embedding = imagebind_service.generate_text_embedding(content)
         elif modality == 'image':
-            embedding = languagebind_service.generate_image_embedding(str(file_path))
+            embedding = imagebind_service.generate_image_embedding(str(file_path))
         elif modality == 'video':
-            embedding = languagebind_service.generate_video_embedding(str(file_path))
+            embedding = imagebind_service.generate_video_embedding(str(file_path))
         elif modality == 'audio':
-            embedding = languagebind_service.generate_audio_embedding(str(file_path))
+            embedding = imagebind_service.generate_audio_embedding(str(file_path))
         elif modality == 'depth':
-            embedding = languagebind_service.generate_depth_embedding(str(file_path))
+            embedding = imagebind_service.generate_depth_embedding(str(file_path))
         elif modality == 'thermal':
-            embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+            embedding = imagebind_service.generate_thermal_embedding(str(file_path))
 
         if embedding is None:
             raise HTTPException(
@@ -710,17 +736,17 @@ async def embed_batch_files(
                 embedding = None
                 if modality == 'text':
                     content = file_path.read_text()
-                    embedding = languagebind_service.generate_text_embedding(content)
+                    embedding = imagebind_service.generate_text_embedding(content)
                 elif modality == 'image':
-                    embedding = languagebind_service.generate_image_embedding(str(file_path))
+                    embedding = imagebind_service.generate_image_embedding(str(file_path))
                 elif modality == 'video':
-                    embedding = languagebind_service.generate_video_embedding(str(file_path))
+                    embedding = imagebind_service.generate_video_embedding(str(file_path))
                 elif modality == 'audio':
-                    embedding = languagebind_service.generate_audio_embedding(str(file_path))
+                    embedding = imagebind_service.generate_audio_embedding(str(file_path))
                 elif modality == 'depth':
-                    embedding = languagebind_service.generate_depth_embedding(str(file_path))
+                    embedding = imagebind_service.generate_depth_embedding(str(file_path))
                 elif modality == 'thermal':
-                    embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+                    embedding = imagebind_service.generate_thermal_embedding(str(file_path))
 
                 if embedding is None:
                     errors.append({
@@ -837,7 +863,7 @@ async def search_vector_store(
             except ValueError:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid modality: {modality}. Must be one of: text, image, video, audio, depth, thermal"
+                    detail=f"Invalid modality: {modality}. Must be one of: text, image, video, audio, depth, thermal, imu"
                 )
 
             # Validate file extension matches modality
@@ -849,8 +875,14 @@ async def search_vector_store(
                 )
 
         # Save uploaded query file temporarily
-        file_id = file_handler.save_upload_file(file, modality_type.value)
-        file_path = file_handler.get_file_path(file_id)
+        result = await file_handler.save_upload_file(file, modality_type)
+        if not result:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to save query file"
+            )
+
+        file_id, file_path = result
 
         try:
             # Generate embedding for query file
@@ -860,17 +892,19 @@ async def search_vector_store(
                 # Read text content
                 with open(file_path, 'r', encoding='utf-8') as f:
                     text_content = f.read()
-                query_embedding = languagebind_service.generate_text_embedding(text_content)
+                query_embedding = imagebind_service.generate_text_embedding(text_content)
             elif modality_type == ModalityType.IMAGE:
-                query_embedding = languagebind_service.generate_image_embedding(str(file_path))
+                query_embedding = imagebind_service.generate_image_embedding(str(file_path))
             elif modality_type == ModalityType.VIDEO:
-                query_embedding = languagebind_service.generate_video_embedding(str(file_path))
+                query_embedding = imagebind_service.generate_video_embedding(str(file_path))
             elif modality_type == ModalityType.AUDIO:
-                query_embedding = languagebind_service.generate_audio_embedding(str(file_path))
+                query_embedding = imagebind_service.generate_audio_embedding(str(file_path))
             elif modality_type == ModalityType.DEPTH:
-                query_embedding = languagebind_service.generate_depth_embedding(str(file_path))
+                query_embedding = imagebind_service.generate_depth_embedding(str(file_path))
             elif modality_type == ModalityType.THERMAL:
-                query_embedding = languagebind_service.generate_thermal_embedding(str(file_path))
+                query_embedding = imagebind_service.generate_thermal_embedding(str(file_path))
+            elif modality_type == ModalityType.IMU:
+                query_embedding = imagebind_service.generate_imu_embedding(str(file_path))
             else:
                 raise HTTPException(
                     status_code=400,
@@ -941,11 +975,69 @@ async def search_vector_store(
 
         finally:
             # Clean up temporary query file
-            file_handler.delete_file(file_id)
+            file_handler.delete_file(file_id, modality_type)
             logger.info(f"Cleaned up temporary query file: {file_id}")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in search_vector_store: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/uploads/{modality}/{file_id}")
+async def serve_uploaded_file(modality: str, file_id: str):
+    """Serve uploaded files for viewing/downloading."""
+    try:
+        # Convert modality string to ModalityType
+        try:
+            modality_type = ModalityType(modality.lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid modality: {modality}"
+            )
+
+        # Get file path
+        file_path = file_handler.get_file_path(file_id, modality_type)
+
+        if not file_path or not file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found: {file_id}"
+            )
+
+        # Determine media type based on file extension
+        media_types = {
+            '.txt': 'text/plain',
+            '.json': 'application/json',
+            '.md': 'text/markdown',
+            '.pdf': 'application/pdf',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.bmp': 'image/bmp',
+            '.mp4': 'video/mp4',
+            '.avi': 'video/x-msvideo',
+            '.mov': 'video/quicktime',
+            '.mkv': 'video/x-matroska',
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.m4a': 'audio/mp4',
+        }
+
+        file_ext = file_path.suffix.lower()
+        media_type = media_types.get(file_ext, 'application/octet-stream')
+
+        return FileResponse(
+            path=str(file_path),
+            media_type=media_type,
+            filename=file_path.name
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving file: {e}")
         raise HTTPException(status_code=500, detail=str(e))

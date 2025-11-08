@@ -41,6 +41,7 @@ class FileHandler:
             ModalityType.IMAGE: settings.allowed_image_formats,
             ModalityType.DEPTH: settings.allowed_depth_formats,
             ModalityType.THERMAL: settings.allowed_thermal_formats,
+            ModalityType.IMU: settings.allowed_imu_formats,
         }
 
         allowed = allowed_formats.get(modality, [])
@@ -181,6 +182,37 @@ class FileHandler:
         except Exception as e:
             logger.error(f"Failed to cleanup old files: {e}")
             return deleted_count
+
+    def calculate_storage_size(self, file_ids: list, modalities: list) -> int:
+        """
+        Calculate total storage size for a list of files.
+
+        Args:
+            file_ids: List of file IDs
+            modalities: List of corresponding modalities
+
+        Returns:
+            int: Total size in bytes
+        """
+        total_size = 0
+
+        try:
+            for file_id, modality_str in zip(file_ids, modalities):
+                try:
+                    # Convert string to ModalityType
+                    modality = ModalityType(modality_str.lower())
+                    file_path = self.get_file_path(file_id, modality)
+                    if file_path and file_path.exists():
+                        total_size += file_path.stat().st_size
+                except Exception as e:
+                    logger.warning(f"Could not get size for file {file_id}: {e}")
+                    continue
+
+            return total_size
+
+        except Exception as e:
+            logger.error(f"Failed to calculate storage size: {e}")
+            return 0
 
 
 # Global file handler instance

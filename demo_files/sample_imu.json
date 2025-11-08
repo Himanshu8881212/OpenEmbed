@@ -1,0 +1,35 @@
+{
+  "sensor_data": {
+    "device_id": "imu_sensor_001",
+    "sampling_rate": 100,
+    "unit": "m/s^2 for acceleration, rad/s for gyroscope",
+    "measurements": [
+      {
+        "timestamp": 0.0,
+        "accelerometer": {"x": 0.012, "y": -0.003, "z": 9.805},
+        "gyroscope": {"x": 0.001, "y": -0.002, "z": 0.0}
+      },
+      {
+        "timestamp": 0.01,
+        "accelerometer": {"x": 0.015, "y": -0.005, "z": 9.810},
+        "gyroscope": {"x": 0.002, "y": -0.001, "z": 0.001}
+      },
+      {
+        "timestamp": 0.02,
+        "accelerometer": {"x": 0.018, "y": -0.004, "z": 9.808},
+        "gyroscope": {"x": 0.001, "y": -0.003, "z": 0.0}
+      },
+      {
+        "timestamp": 0.03,
+        "accelerometer": {"x": 0.020, "y": -0.006, "z": 9.812},
+        "gyroscope": {"x": 0.003, "y": -0.002, "z": 0.002}
+      },
+      {
+        "timestamp": 0.04,
+        "accelerometer": {"x": 0.022, "y": -0.005, "z": 9.815},
+        "gyroscope": {"x": 0.002, "y": -0.001, "z": 0.001}
+      }
+    ]
+  }
+}
+

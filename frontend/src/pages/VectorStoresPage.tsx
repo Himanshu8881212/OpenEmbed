@@ -7,34 +7,26 @@ import {
   CardContent,
   CardActions,
   Button,
-  Chip,
   IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
   Divider,
   Alert,
   Snackbar,
   CircularProgress,
+  Paper,
+  Chip,
+  ListItemButton,
 } from '@mui/material';
 import {
-  Storage,
   Delete,
-  Visibility,
-  Image,
-  VideoLibrary,
-  AudioFile,
-  Thermostat,
-  Layers,
-  TextFields,
   FolderOpen,
+  Close,
+  OpenInNew,
 } from '@mui/icons-material';
-import { motion } from 'framer-motion';
 import {
   getVectorStores,
   getVectorStoreFiles,
@@ -43,13 +35,12 @@ import {
   EmbeddedFile,
 } from '../services/api';
 
-const modalityIcons: { [key: string]: React.ReactElement } = {
-  image: <Image />,
-  video: <VideoLibrary />,
-  audio: <AudioFile />,
-  thermal: <Thermostat />,
-  depth: <Layers />,
-  text: <TextFields />,
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 };
 
 const VectorStoresPage: React.FC = () => {
@@ -133,103 +124,99 @@ const VectorStoresPage: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ py: 8 }}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-      >
-        <Typography variant="h2" gutterBottom sx={{ mb: 2, fontWeight: 300 }}>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Box sx={{ mb: 4, borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
+        <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Vector Stores
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 6 }}>
-          Manage your vector stores and view embedded files
+        <Typography variant="body2" color="text.secondary">
+          {vectorStores.length} stores • {vectorStores.reduce((sum, s) => sum + s.count, 0)} files • {formatBytes(vectorStores.reduce((sum, s) => sum + (s.size_bytes || 0), 0))}
         </Typography>
+      </Box>
 
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : vectorStores.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+          <CircularProgress />
+        </Box>
+      ) : vectorStores.length === 0 ? (
+        <Paper sx={{ p: 8, textAlign: 'center', border: '2px dashed', borderColor: 'divider' }}>
+          <FolderOpen sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+            No Vector Stores
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Upload files to create a vector store
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={() => window.location.href = '/upload'}
           >
-            <Card sx={{ p: 8, textAlign: 'center' }}>
-              <FolderOpen sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h5" gutterBottom>
-                No Vector Stores Yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Upload some files to create your first vector store
-              </Typography>
-            </Card>
-          </motion.div>
-        ) : (
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: {
-                xs: '1fr',
-                sm: 'repeat(2, 1fr)',
-                md: 'repeat(3, 1fr)',
-              },
-              gap: 3,
-            }}
-          >
-            {vectorStores.map((store, index) => (
-              <motion.div
+            Upload Files
+          </Button>
+        </Paper>
+      ) : (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }, gap: 2 }}>
+          {vectorStores.map((store) => {
+            const modality = store.modality?.toLowerCase() || 'unknown';
+
+            return (
+              <Card
                 key={store.name}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ delay: index * 0.1 }}
+                sx={{
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                }}
               >
-                <Card
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                    overflow: 'visible',
-                  }}
-                >
-                  <CardContent sx={{ flexGrow: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <Storage sx={{ mr: 1, color: 'primary.main' }} />
-                      <Typography variant="h6" component="div" noWrap>
-                        {store.name}
+                <CardContent sx={{ flex: 1 }}>
+                  <Typography variant="h6" noWrap sx={{ fontWeight: 600, mb: 1 }}>
+                    {store.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {modality}
+                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <Box>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                        {store.count.toLocaleString()}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        files
                       </Typography>
                     </Box>
-                    <Chip
-                      label={`${store.count} embeddings`}
-                      size="small"
-                      sx={{ mb: 1 }}
-                    />
-                  </CardContent>
-                  <CardActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
-                    <Button
-                      size="small"
-                      startIcon={<Visibility />}
-                      onClick={() => handleViewStore(store)}
-                    >
-                      View
-                    </Button>
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => handleDeleteClick(store.name)}
-                    >
-                      <Delete />
-                    </IconButton>
-                  </CardActions>
-                </Card>
-              </motion.div>
-            ))}
-          </Box>
-        )}
-      </motion.div>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        {formatBytes(store.size_bytes || 0)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        storage
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+
+                <CardActions sx={{ p: 2, gap: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleViewStore(store)}
+                  >
+                    View
+                  </Button>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDeleteClick(store.name)}
+                  >
+                    <Delete />
+                  </IconButton>
+                </CardActions>
+              </Card>
+            );
+          })}
+        </Box>
+      )}
 
       {/* View Store Dialog */}
       <Dialog
@@ -245,51 +232,109 @@ const VectorStoresPage: React.FC = () => {
         }}
       >
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Storage sx={{ mr: 1 }} />
-            {selectedStore?.name}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                {selectedStore?.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {storeFiles.length} files
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setDialogOpen(false)}>
+              <Close />
+            </IconButton>
           </Box>
         </DialogTitle>
+        <Divider />
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            {storeFiles.length} embedded file(s)
-          </Typography>
-          <Divider sx={{ my: 2 }} />
-          <List>
-            {storeFiles.map((file, index) => (
-              <motion.div
-                key={file.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <ListItem>
-                  <ListItemIcon>
-                    {modalityIcons[file.modality] || <TextFields />}
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={file.filename}
-                    secondary={
-                      <Box component="span" sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
-                        <Chip
-                          label={file.modality}
-                          size="small"
-                          sx={{ textTransform: 'capitalize' }}
-                        />
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(file.timestamp).toLocaleString()}
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                </ListItem>
-                {index < storeFiles.length - 1 && <Divider />}
-              </motion.div>
-            ))}
+          <List sx={{ pt: 2 }}>
+            {storeFiles.map((file) => {
+              const handleFileClick = async () => {
+                try {
+                  // Construct the file URL based on the backend API endpoint
+                  const fileUrl = `http://localhost:8000/api/uploads/${file.modality}/${file.id}`;
+
+                  // Fetch the file as a blob
+                  const response = await fetch(fileUrl);
+                  if (!response.ok) {
+                    throw new Error('Failed to fetch file');
+                  }
+
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+
+                  // Create a temporary link and trigger download
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = file.filename || `file_${file.id}`;
+                  document.body.appendChild(link);
+                  link.click();
+
+                  // Cleanup
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('Error downloading file:', error);
+                  setSnackbar({
+                    open: true,
+                    message: 'Failed to download file',
+                    severity: 'error',
+                  });
+                }
+              };
+
+              return (
+                <ListItemButton
+                  key={file.id}
+                  onClick={handleFileClick}
+                  sx={{
+                    mb: 1,
+                    p: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    bgcolor: 'background.paper',
+                    '&:hover': {
+                      borderColor: 'text.secondary',
+                    },
+                  }}
+                >
+                  <Box sx={{ flex: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {file.filename}
+                      </Typography>
+                      <Chip
+                        label={file.modality}
+                        size="small"
+                        sx={{
+                          height: 20,
+                          fontSize: '0.7rem',
+                          bgcolor: 'background.default',
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      />
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(file.timestamp).toLocaleString()}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Download
+                    </Typography>
+                    <OpenInNew sx={{ fontSize: 16, color: 'text.secondary' }} />
+                  </Box>
+                </ListItemButton>
+              );
+            })}
           </List>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setDialogOpen(false)} variant="contained">
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -327,7 +372,7 @@ const VectorStoresPage: React.FC = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Container >
   );
 };
 
