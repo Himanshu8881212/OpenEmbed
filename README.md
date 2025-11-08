@@ -21,7 +21,7 @@ OpenEmbed is a professional embedding warehouse that enables you to store, searc
 
 ## 🚀 Quick Start
 
-### 🐳 Docker Installation (Recommended - Easiest!)
+### 🐳 Docker Installation (Recommended)
 
 **Prerequisites**: Docker Desktop ([Download](https://www.docker.com/products/docker-desktop))
 
@@ -30,17 +30,29 @@ OpenEmbed is a professional embedding warehouse that enables you to store, searc
 git clone https://github.com/Himanshu8881212/EMBEd.git
 cd EMBEd
 
-# Start with one command!
+# Start with Docker Compose
 docker-compose up -d
 
-# Or use the interactive script
-./start.sh        # Linux/Mac
-start.bat         # Windows
+# Wait ~30 seconds for model to load, then access:
+# http://localhost:8000
 ```
 
-**Access**: http://localhost:8000
+**That's it!** 🎉
 
-**That's it!** 🎉 See [DOCKER_INSTALL.md](DOCKER_INSTALL.md) for detailed instructions.
+**Useful Commands**:
+```bash
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+
+# Rebuild after code changes
+docker-compose down -v
+docker rmi embed-embed
+docker-compose build
+docker-compose up -d
+```
 
 ---
 
