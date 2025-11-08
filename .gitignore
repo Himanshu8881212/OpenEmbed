@@ -67,6 +67,8 @@ logs/
 htmlcov/
 test_results/
 *.test.log
+test_results.txt
+full_test_results.txt
 
 # Docker
 docker-compose.override.yml
