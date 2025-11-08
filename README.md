@@ -29,8 +29,8 @@ docker-compose up -d
 
 Open **http://localhost:8000** in your browser:
 
-1. Create a vector store (e.g., "my_documents")
-2. Drag & drop your files (PDFs, images, videos, audio)
+1. Create a vector store named **"company_docs"**
+2. Drag & drop your files (company_policy.pdf, employee_handbook.pdf, etc.)
 3. EMBEd automatically generates embeddings ✨
 
 ### Step 3: Query from Python
@@ -39,25 +39,34 @@ Open **http://localhost:8000** in your browser:
 # Install SDK
 pip install requests
 
-# Copy this to your project
+# Copy the SDK file to your project
+# (from sdk/python/openembed.py)
 from openembed import OpenEmbedClient
 
-# Connect to EMBEd
+# Connect to EMBEd service
 client = OpenEmbedClient("http://localhost:8000")
 
-# Search your documents
+# Search your documents (use the store name from Step 2)
 results = client.search(
-    vector_store="my_documents",
+    vector_store="company_docs",  # Same name as Step 2
     query="What is our vacation policy?",
     n_results=5
 )
 
-# Use the results
+# Display results
 for result in results:
     print(f"📄 {result['metadata']['filename']}")
-    print(f"   Similarity: {result['similarity']:.1%}")
-    print(f"   Content: {result['metadata'].get('text_content', 'N/A')[:200]}")
+    print(f"   Match: {result['similarity']:.1%}")
     print()
+```
+
+**Output:**
+```
+📄 company_policy.pdf
+   Match: 87.3%
+
+📄 employee_handbook.pdf
+   Match: 72.1%
 ```
 
 **That's it!** Your documents are now searchable. 🎉
@@ -68,24 +77,30 @@ for result in results:
 
 ```python
 from openembed import OpenEmbedClient
-from openai import OpenAI  # or anthropic, or ollama
+from openai import OpenAI  # or anthropic, ollama, etc.
 
 # 1. Get relevant documents from EMBEd
 embed_client = OpenEmbedClient("http://localhost:8000")
-results = embed_client.search("my_documents", "vacation policy", n_results=3)
+results = embed_client.search(
+    vector_store="company_docs",  # Your store from Step 2
+    query="What is our vacation policy?",
+    n_results=3
+)
 
-# 2. Build context from results
+# 2. Build context from retrieved documents
 context = "\n\n".join([
-    f"Source: {r['metadata']['filename']}\n{r['metadata'].get('text_content', '')}"
+    f"Source: {r['metadata']['filename']}\n"
+    f"Relevance: {r['similarity']:.1%}\n"
+    f"Content: [Document content would be here]"
     for r in results
 ])
 
-# 3. Send to your LLM
+# 3. Send to your LLM with context
 openai = OpenAI()
 response = openai.chat.completions.create(
     model="gpt-4",
     messages=[
-        {"role": "system", "content": "Answer using only the provided context."},
+        {"role": "system", "content": "Answer based only on the provided context."},
         {"role": "user", "content": f"Context:\n{context}\n\nQuestion: What is our vacation policy?"}
     ]
 )
@@ -242,17 +257,6 @@ docker-compose logs -f
 # Look for: "Application startup complete"
 ```
 </details>
-
----
-
-## 📖 Examples
-
-See working examples in [`examples/`](examples/):
-
-```bash
-cd examples
-python get_started.py  # Complete RAG application with LM Studio
-```
 
 ---
 
