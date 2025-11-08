@@ -361,22 +361,24 @@ const SearchPage: React.FC = () => {
                         </Typography>
                       )}
                     </Box>
-                    <Tooltip title={result.file_path}>
+                    <Tooltip title={result.file_path || result.metadata?.filename || 'Unknown file'}>
                       <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
-                        {result.file_path.split('/').pop()}
+                        {result.file_path ? result.file_path.split('/').pop() : result.metadata?.filename || result.id}
                       </Typography>
                     </Tooltip>
-                    <Button
-                      fullWidth
-                      size="small"
-                      variant="outlined"
-                      startIcon={<Download />}
-                      href={`http://localhost:8000${result.file_path}`}
-                      download
-                      sx={{ mt: 1 }}
-                    >
-                      Download
-                    </Button>
+                    {result.file_path && (
+                      <Button
+                        fullWidth
+                        size="small"
+                        variant="outlined"
+                        startIcon={<Download />}
+                        href={`http://localhost:8000${result.file_path}`}
+                        download
+                        sx={{ mt: 1 }}
+                      >
+                        Download
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               ))}

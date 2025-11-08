@@ -650,13 +650,19 @@ async def search_similar(request: SearchRequest):
             metadata = results['metadatas'][0][i] if request.include_metadata else None
             modality = metadata.get('modality', 'unknown') if metadata else 'unknown'
 
+            # Construct file_path from metadata
+            file_path = None
+            if metadata and 'file_id' in metadata and 'modality' in metadata:
+                file_path = f"/api/uploads/{metadata['modality']}/{metadata['file_id']}"
+
             search_results.append(SearchResult(
                 id=result_id,
                 similarity=similarity,
                 distance=distance,
                 modality=modality,
                 metadata=metadata,
-                rank=i + 1
+                rank=i + 1,
+                file_path=file_path
             ))
 
         return SearchResponse(
@@ -1108,13 +1114,19 @@ async def search_vector_store(
                 # similarity = 1 / (1 + distance)
                 similarity = 1.0 - (distance / 2.0)  # Normalize to [0, 1]
 
+                # Construct file_path from metadata
+                file_path = None
+                if metadata and 'file_id' in metadata and 'modality' in metadata:
+                    file_path = f"/api/uploads/{metadata['modality']}/{metadata['file_id']}"
+
                 results.append(SearchResult(
                     id=result_id,
                     similarity=float(similarity),
                     distance=float(distance),
                     modality=metadata.get('modality', 'unknown'),
                     metadata=metadata,
-                    rank=i + 1
+                    rank=i + 1,
+                    file_path=file_path
                 ))
 
             logger.info(f"Search completed: found {len(results)} results")

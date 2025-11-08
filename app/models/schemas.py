@@ -128,6 +128,7 @@ class SearchResult(BaseModel):
     modality: str  # Modality of the result
     metadata: Optional[Dict[str, Any]]
     rank: int  # Rank in search results (1-based)
+    file_path: Optional[str] = None  # Path to download the file
 
 
 class SearchResponse(BaseModel):
