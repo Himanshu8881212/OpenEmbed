@@ -82,17 +82,27 @@ class SimpleRAG:
     def add_documents(self, store_name: str, file_paths: list):
         """Add documents to vector store."""
         print(f"\n📄 Adding {len(file_paths)} documents to {store_name}...")
-        
+
         results = []
         for file_path in file_paths:
             if not os.path.exists(file_path):
                 print(f"⚠️  File not found: {file_path}")
                 continue
-                
-            result = self.embed_client.upload_file(store_name, file_path)
+
+            # Detect modality from file extension
+            ext = os.path.splitext(file_path)[1].lower()
+            modality_map = {
+                '.txt': 'text', '.md': 'text', '.pdf': 'text',
+                '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image',
+                '.mp4': 'video', '.avi': 'video', '.mov': 'video',
+                '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio'
+            }
+            modality = modality_map.get(ext, 'text')
+
+            result = self.embed_client.upload(store_name, file_path, modality)
             results.append(result)
             print(f"✅ Added: {os.path.basename(file_path)}")
-        
+
         print(f"\n✅ Added {len(results)} documents successfully")
         return results
     
@@ -118,41 +128,41 @@ class SimpleRAG:
             question,
             n_results=n_results
         )
-        
-        if not search_results.get("results"):
+
+        if not search_results or len(search_results) == 0:
             print("❌ No documents found")
             return {"answer": "No relevant documents found.", "documents": []}
-        
+
         # Display retrieved documents
         documents = []
-        for i, result in enumerate(search_results["results"], 1):
+        for i, result in enumerate(search_results, 1):
             metadata = result.get("metadata", {})
             distance = result.get("distance", 0)
             relevance = (1 - distance) * 100
-            
+
             doc_info = {
                 "filename": metadata.get("filename", "unknown"),
                 "modality": metadata.get("modality", "unknown"),
                 "relevance": relevance
             }
             documents.append(doc_info)
-            
+
             print(f"   {i}. {doc_info['modality']}: {doc_info['filename']} ({relevance:.1f}%)")
-        
+
         # Build context from documents
         context_parts = []
-        for i, result in enumerate(search_results["results"], 1):
+        for i, result in enumerate(search_results, 1):
             metadata = result.get("metadata", {})
             filename = metadata.get("filename", "unknown")
             modality = metadata.get("modality", "unknown")
-            
+
             # For text files, include content if available
             if modality == "text" and "text_content" in metadata:
                 content = metadata["text_content"][:500]  # Limit to 500 chars
                 context_parts.append(f"[{i}] {filename}:\n{content}")
             else:
                 context_parts.append(f"[{i}] {filename} ({modality})")
-        
+
         context = "\n\n".join(context_parts)
         
         # Generate answer
