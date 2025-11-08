@@ -14,6 +14,134 @@ from PIL import Image
 from app.core.config import settings
 
 
+def load_and_transform_video_data_pyav(
+    video_paths,
+    device,
+    clip_duration=2,
+    clips_per_video=5,
+    sample_rate=16000,
+):
+    """
+    Custom video loading function that uses 'pyav' decoder instead of 'decord'.
+    This is a drop-in replacement for imagebind.data.load_and_transform_video_data
+    that works without decord dependency.
+
+    Args:
+        video_paths: List of video file paths
+        device: torch device (cpu, cuda, mps)
+        clip_duration: Duration of each clip in seconds
+        clips_per_video: Number of clips to sample per video
+        sample_rate: Audio sample rate (not used for video-only)
+
+    Returns:
+        Preprocessed video tensor ready for ImageBind model
+    """
+    if video_paths is None:
+        return None
+
+    # Import required modules
+    from torchvision import transforms
+    from pytorchvideo.data.encoded_video import EncodedVideo
+    from pytorchvideo.transforms import (
+        UniformTemporalSubsample,
+        ShortSideScale,
+    )
+    from pytorchvideo.data.clip_sampling import ConstantClipsPerVideoSampler
+
+    # Define normalization transform
+    class NormalizeVideo:
+        def __init__(self, mean, std):
+            # Shape should be [C, 1, 1, 1] to broadcast correctly across [C, T, H, W]
+            self.mean = torch.tensor(mean).view(3, 1, 1, 1)
+            self.std = torch.tensor(std).view(3, 1, 1, 1)
+
+        def __call__(self, video):
+            return (video - self.mean) / self.std
+
+    video_outputs = []
+    video_transform = transforms.Compose(
+        [
+            ShortSideScale(224),
+            NormalizeVideo(
+                mean=(0.48145466, 0.4578275, 0.40821073),
+                std=(0.26862954, 0.26130258, 0.27577711),
+            ),
+        ]
+    )
+
+    clip_sampler = ConstantClipsPerVideoSampler(
+        clip_duration=clip_duration, clips_per_video=clips_per_video
+    )
+    frame_sampler = UniformTemporalSubsample(num_samples=clip_duration)
+
+    for video_path in video_paths:
+        # Use 'pyav' decoder instead of 'decord'
+        video = EncodedVideo.from_path(
+            video_path,
+            decoder="pyav",  # Changed from "decord" to "pyav"
+            decode_audio=False,
+        )
+
+        all_clips_timepoints = get_clip_timepoints(clip_sampler, video.duration)
+
+        all_video = []
+        for clip_timepoints in all_clips_timepoints:
+            # Read and transform video
+            video_data = video.get_clip(clip_timepoints[0], clip_timepoints[1])
+            video_data = frame_sampler(video_data["video"])
+
+            # Ensure video has 3 channels (RGB)
+            # Video data shape is [C, T, H, W] where C is channels
+            if video_data.shape[0] != 3:
+                logger.info(f"Video has {video_data.shape[0]} channels, converting to 3 channels (RGB). Shape: {video_data.shape}")
+                # Convert grayscale or other formats to RGB by repeating channels
+                if video_data.shape[0] == 1:
+                    # Grayscale: repeat channel 3 times
+                    video_data = video_data.repeat(3, 1, 1, 1)
+                elif video_data.shape[0] == 2:
+                    # 2-channel video: duplicate first channel to make RGB
+                    video_data = torch.cat([video_data, video_data[:1]], dim=0)
+                else:
+                    # For other channel counts, take first 3 channels or pad with zeros
+                    if video_data.shape[0] > 3:
+                        video_data = video_data[:3]
+                    else:
+                        # Pad with zeros to make 3 channels
+                        padding = torch.zeros(3 - video_data.shape[0], *video_data.shape[1:])
+                        video_data = torch.cat([video_data, padding], dim=0)
+                logger.info(f"Converted to {video_data.shape[0]} channels. New shape: {video_data.shape}")
+
+            video_data = video_transform(video_data)
+            all_video.append(video_data)
+
+        all_video = torch.stack(all_video, dim=0)
+        video_outputs.append(all_video)
+
+    return torch.stack(video_outputs, dim=0).to(device)
+
+
+def get_clip_timepoints(clip_sampler, duration):
+    """
+    Helper function to get clip timepoints from sampler.
+
+    Args:
+        clip_sampler: Clip sampler object
+        duration: Video duration in seconds
+
+    Returns:
+        List of (start_time, end_time) tuples for each clip
+    """
+    # Read all clips in the video
+    all_clips_timepoints = []
+    is_last_clip = False
+    end = 0.0
+    while not is_last_clip:
+        start, end, _, _, is_last_clip = clip_sampler(end, duration, annotation=None)
+        all_clips_timepoints.append((start, end))
+
+    return all_clips_timepoints
+
+
 class ImageBindService:
     """
     Service class for ImageBind multi-modal embeddings.
@@ -174,16 +302,24 @@ class ImageBindService:
             return None
 
     def generate_video_embedding(self, video_path: Union[str, Path]) -> Optional[np.ndarray]:
-        """Generate embedding for video input."""
+        """
+        Generate embedding for video input.
+        Uses custom pyav-based video loader instead of decord.
+        """
         if not self._initialized:
             logger.error("Service not initialized")
             return None
 
         try:
             video_path = str(video_path)
+            logger.info(f"Loading video with pyav decoder: {video_path}")
+
+            # Use our custom video loader that uses 'pyav' instead of 'decord'
             inputs = {
-                self.ModalityType.VISION: self.imagebind_data.load_and_transform_video_data([video_path], self.device)
+                self.ModalityType.VISION: load_and_transform_video_data_pyav([video_path], self.device)
             }
+
+            logger.info("✅ Video loaded successfully with pyav decoder")
             return self._generate_embedding(inputs, self.ModalityType.VISION)
 
         except Exception as e:

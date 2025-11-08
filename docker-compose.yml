@@ -66,10 +66,10 @@ services:
       resources:
         limits:
           cpus: '4'
-          memory: 12G
+          memory: 16G
         reservations:
           cpus: '2'
-          memory: 4G
+          memory: 6G
 
 # ============================================================================
 # Named Volumes for Persistent Data
