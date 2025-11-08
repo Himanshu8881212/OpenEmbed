@@ -9,7 +9,7 @@ import os
 from app.core.config import settings
 from app.core.logger import app_logger as logger
 from app.api.routes import router
-from app.services import imagebind_service, chroma_service
+from app.services import imagebind_service, chroma_service, database_service
 
 
 @asynccontextmanager
@@ -24,6 +24,13 @@ async def lifespan(app: FastAPI):
     # Create necessary directories
     settings.create_directories()
     os.makedirs("logs", exist_ok=True)
+
+    # Initialize SQLite database
+    logger.info("Initializing SQLite database...")
+    if not database_service.initialize():
+        logger.error("Failed to initialize database")
+    else:
+        logger.info("Database initialized successfully")
 
     # Initialize ChromaDB
     logger.info("Initializing ChromaDB...")

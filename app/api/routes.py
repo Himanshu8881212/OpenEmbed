@@ -22,7 +22,7 @@ from app.models.schemas import (
     ModalityType,
     VectorStoreOperation
 )
-from app.services import imagebind_service, chroma_service
+from app.services import imagebind_service, chroma_service, database_service
 from app.utils import file_handler, modality_detector
 from app.core.logger import app_logger as logger
 
@@ -52,7 +52,7 @@ async def create_vector_store(request: VectorStoreCreate):
                 detail=f"Vector store '{request.name}' already exists"
             )
 
-        # Create collection
+        # Create collection in ChromaDB
         success = chroma_service.create_collection(
             name=request.name,
             description=request.description,
@@ -64,6 +64,13 @@ async def create_vector_store(request: VectorStoreCreate):
                 status_code=500,
                 detail="Failed to create vector store"
             )
+
+        # Create record in SQLite database
+        database_service.create_vector_store(
+            name=request.name,
+            description=request.description,
+            metadata=request.metadata
+        )
 
         # Get collection info
         info = chroma_service.get_collection_info(request.name)
@@ -90,33 +97,16 @@ async def create_vector_store(request: VectorStoreCreate):
 
 @router.get("/vector-stores", response_model=VectorStoreList)
 async def list_vector_stores():
-    """List all vector stores."""
+    """List all vector stores with analytics from SQLite."""
     try:
         collections = chroma_service.list_collections()
 
         stores = []
         for col in collections:
-            # Calculate storage size and modality counts for this store
-            size_bytes = 0
-            modality_counts = {}
-            try:
-                items = chroma_service.get_all_items(col['name'])
-                if items and 'ids' in items and 'metadatas' in items:
-                    file_ids = []
-                    modalities = []
-                    for metadata in items.get('metadatas', []):
-                        if 'file_id' in metadata and 'modality' in metadata:
-                            file_ids.append(metadata['file_id'])
-                            modalities.append(metadata['modality'])
-
-                            # Count modalities
-                            modality = metadata['modality']
-                            modality_counts[modality] = modality_counts.get(modality, 0) + 1
-
-                    if file_ids:
-                        size_bytes = file_handler.calculate_storage_size(file_ids, modalities)
-            except Exception as e:
-                logger.warning(f"Could not calculate size for store {col['name']}: {e}")
+            # Get analytics from SQLite database (much faster!)
+            file_count = database_service.get_store_file_count(col['name'])
+            size_bytes = database_service.get_store_size(col['name'])
+            modality_counts = database_service.get_store_modality_counts(col['name'])
 
             # Add modality_counts to metadata
             metadata_with_counts = col['metadata'].copy()
@@ -125,7 +115,7 @@ async def list_vector_stores():
             stores.append(VectorStoreInfo(
                 name=col['name'],
                 description=col['metadata'].get('description'),
-                count=col['count'],
+                count=file_count,  # Use SQLite count instead of ChromaDB count
                 modality=col['metadata'].get('modality'),
                 created_at=datetime.fromisoformat(col['metadata'].get('created_at', datetime.utcnow().isoformat())),
                 metadata=metadata_with_counts,
@@ -212,6 +202,9 @@ async def delete_vector_store(name: str):
                 detail=f"Vector store '{name}' not found"
             )
 
+        # Delete from SQLite database (CASCADE will delete related records)
+        database_service.delete_vector_store(name)
+
         return {"success": True, "message": f"Vector store '{name}' deleted successfully"}
 
     except HTTPException:
@@ -266,6 +259,10 @@ async def embed_folder(
         if create_new:
             if not chroma_service.collection_exists(vector_store):
                 chroma_service.create_collection(
+                    name=vector_store,
+                    description=f"Multi-modal vector store"
+                )
+                database_service.create_vector_store(
                     name=vector_store,
                     description=f"Multi-modal vector store"
                 )
@@ -347,6 +344,16 @@ async def embed_folder(
                 )
 
                 if embedding_id:
+                    # Record upload in SQLite database
+                    database_service.record_file_upload(
+                        file_id=file_id,
+                        embedding_id=embedding_id,
+                        filename=file.filename,
+                        modality=modality,
+                        size_bytes=file_path.stat().st_size,
+                        vector_store=vector_store
+                    )
+
                     results.append({
                         'filename': file.filename,
                         'modality': modality,
@@ -663,6 +670,14 @@ async def search_similar(request: SearchRequest):
                 rank=i + 1,
                 file_path=file_path
             ))
+
+        # Record search analytics in SQLite
+        database_service.record_search(
+            vector_store=request.vector_store_name,
+            query_modality=request.query_modality.value,
+            query_text=request.query_text if request.query_modality == ModalityType.TEXT else None,
+            results_count=len(search_results)
+        )
 
         return SearchResponse(
             success=True,
@@ -1206,4 +1221,71 @@ async def serve_uploaded_file(modality: str, file_id: str):
         raise
     except Exception as e:
         logger.error(f"Error serving file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Analytics Endpoints ====================
+
+@router.get("/analytics/overview")
+async def get_analytics_overview():
+    """Get system-wide analytics overview."""
+    try:
+        stats = database_service.get_system_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting analytics overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/searches")
+async def get_search_analytics(
+    vector_store: Optional[str] = None,
+    days: int = 7
+):
+    """Get search analytics for a specific store or all stores."""
+    try:
+        stats = database_service.get_search_stats(vector_store=vector_store, days=days)
+        return {
+            "success": True,
+            "vector_store": vector_store or "all",
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting search analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/store/{name}")
+async def get_store_analytics(name: str):
+    """Get detailed analytics for a specific vector store."""
+    try:
+        # Check if store exists
+        if not chroma_service.collection_exists(name):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store '{name}' not found"
+            )
+
+        file_count = database_service.get_store_file_count(name)
+        size_bytes = database_service.get_store_size(name)
+        modality_counts = database_service.get_store_modality_counts(name)
+        search_stats = database_service.get_search_stats(vector_store=name, days=30)
+
+        return {
+            "success": True,
+            "vector_store": name,
+            "analytics": {
+                "file_count": file_count,
+                "size_bytes": size_bytes,
+                "modality_counts": modality_counts,
+                "search_stats_30_days": search_stats
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting store analytics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
