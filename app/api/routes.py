@@ -1,1291 +1,762 @@
 """
-API routes for the EMBEd application.
+API routes — multimodal indexing and fan-out retrieval.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
 from fastapi.responses import FileResponse
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
-from pathlib import Path
+import asyncio
+import uuid
+import os
+import glob
+import shutil
 
-from app.models.schemas import (
-    VectorStoreCreate,
-    VectorStoreInfo,
-    VectorStoreList,
-    EmbeddingRequest,
-    EmbeddingResponse,
-    FileUploadResponse,
-    SearchRequest,
-    SearchResponse,
-    SearchResult,
-    HealthResponse,
-    ErrorResponse,
-    ModalityType,
-    VectorStoreOperation
-)
-from app.services import imagebind_service, chroma_service, database_service
-from app.utils import file_handler, modality_detector
+from app.models.schemas import ModalityType, detect_modality, MIME_TYPES, EXTENSION_TO_MODALITY
+from app.services import perception_service, chroma_service, db_service, bm25_service, reranker_service, asr_service, image_captioner
+from app.services.chunking_service import chunk_content, chunk_text
+from app.core.config import settings
 from app.core.logger import app_logger as logger
+from app.core.security import (
+    generate_api_key, validate_request_auth, validate_admin_auth,
+    validate_store_name, sanitize_filename,
+)
+from app.core.rate_limiter import limiter
 
 router = APIRouter()
 
-
-@router.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint."""
-    return HealthResponse(
-        status="healthy",
-        version="1.0.0",
-        models_loaded=imagebind_service.is_initialized(),
-        vector_store_connected=chroma_service.is_initialized(),
-        timestamp=datetime.utcnow()
-    )
+ALL_SPACES = ("image", "audio", "video")
 
 
-@router.post("/vector-stores", response_model=VectorStoreInfo)
-async def create_vector_store(request: VectorStoreCreate):
-    """Create a new vector store (collection)."""
-    try:
-        # Check if collection already exists
-        if chroma_service.collection_exists(request.name):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Vector store '{request.name}' already exists"
-            )
+# ── Helpers ───────────────────────────────────────────────────────
 
-        # Create collection in ChromaDB
-        success = chroma_service.create_collection(
-            name=request.name,
-            description=request.description,
-            metadata=request.metadata
+def _validate_file_size(file_bytes: bytes, filename: str) -> None:
+    if len(file_bytes) > settings.max_file_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File '{filename}' exceeds maximum size of {settings.max_file_size // 1_000_000}MB",
         )
 
-        if not success:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to create vector store"
-            )
 
-        # Create record in SQLite database
-        database_service.create_vector_store(
-            name=request.name,
-            description=request.description,
-            metadata=request.metadata
+def _save_file(store_name: str, doc_id: str, filename: str, file_bytes: bytes) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    save_dir = os.path.join(settings.upload_dir, store_name)
+    os.makedirs(save_dir, exist_ok=True)
+    save_name = f"{doc_id}{ext}"
+    save_path = os.path.join(save_dir, save_name)
+    with open(save_path, "wb") as f:
+        f.write(file_bytes)
+    return f"/api/files/{store_name}/{save_name}"
+
+
+async def _index_text_chunk(vault: str, chunk_id: str, text: str, base_meta: Dict) -> None:
+    """Embed a single text chunk into all 3 spaces. Kept for backward compatibility."""
+    await _index_text_chunks(vault, [{"chunk_id": chunk_id, "text": text, "base_meta": base_meta}])
+
+
+async def _index_text_chunks(vault: str, items: List[Dict]) -> None:
+    """Batch-embed many text chunks into all 3 spaces.
+
+    Each item: {"chunk_id": str, "text": str, "base_meta": Dict}
+    Writes 1 chroma_service.add_chunks call per space (3 total) with all chunks.
+    """
+    if not items:
+        return
+    texts = [it["text"] for it in items]
+    # PE inference is sync + heavy — run off the event loop
+    embeds_per_text = await asyncio.to_thread(perception_service.encode_text_all_batch, texts)
+
+    for space in ALL_SPACES:
+        rows = [
+            {
+                "id": items[i]["chunk_id"],
+                "embedding": embeds_per_text[i][space],
+                "metadata": {**items[i]["base_meta"], "space": space},
+                "text": texts[i],
+            }
+            for i in range(len(items))
+        ]
+        chroma_service.add_chunks(vault, space, rows)
+
+
+# ── Health ────────────────────────────────────────────────────────
+
+@router.get("/health")
+async def health():
+    try:
+        memory = perception_service.memory_stats()
+    except Exception as e:
+        memory = {"error": str(e)}
+    return {
+        "status": "healthy" if perception_service.is_ready() and chroma_service.is_ready() else "degraded",
+        "perception_encoder": perception_service.is_ready(),
+        "chromadb": chroma_service.is_ready(),
+        "memory": memory,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+# ── Vector Stores ─────────────────────────────────────────────────
+
+@router.post("/stores")
+@limiter.limit(settings.rate_limit_stores)
+async def create_store(request: Request, name: str = Form(...), description: str = Form("")):
+    """Create a new vault. Returns a one-time API key."""
+    validate_admin_auth(request)
+    validate_store_name(name)
+    try:
+        plaintext_key, hashed_key = generate_api_key()
+        store = chroma_service.create_collection(
+            name, description,
+            extra_metadata={"api_key_hash": hashed_key},
         )
-
-        # Get collection info
-        info = chroma_service.get_collection_info(request.name)
-        if not info:
-            raise HTTPException(
-                status_code=500,
-                detail="Created vector store but failed to retrieve info"
-            )
-
-        return VectorStoreInfo(
-            name=info['name'],
-            description=info['metadata'].get('description'),
-            count=info['count'],
-            created_at=datetime.fromisoformat(info['metadata'].get('created_at', datetime.utcnow().isoformat())),
-            metadata=info['metadata']
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating vector store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/vector-stores", response_model=VectorStoreList)
-async def list_vector_stores():
-    """List all vector stores with analytics from SQLite."""
-    try:
-        collections = chroma_service.list_collections()
-
-        stores = []
-        for col in collections:
-            # Get analytics from SQLite database (much faster!)
-            file_count = database_service.get_store_file_count(col['name'])
-            size_bytes = database_service.get_store_size(col['name'])
-            modality_counts = database_service.get_store_modality_counts(col['name'])
-
-            # Add modality_counts to metadata
-            metadata_with_counts = col['metadata'].copy()
-            metadata_with_counts['modality_counts'] = modality_counts
-
-            stores.append(VectorStoreInfo(
-                name=col['name'],
-                description=col['metadata'].get('description'),
-                count=file_count,  # Use SQLite count instead of ChromaDB count
-                modality=col['metadata'].get('modality'),
-                created_at=datetime.fromisoformat(col['metadata'].get('created_at', datetime.utcnow().isoformat())),
-                metadata=metadata_with_counts,
-                size_bytes=size_bytes
-            ))
-
-        return VectorStoreList(stores=stores, total=len(stores))
-
-    except Exception as e:
-        logger.error(f"Error listing vector stores: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/vector-stores/{name}", response_model=VectorStoreInfo)
-async def get_vector_store(name: str):
-    """Get information about a specific vector store."""
-    try:
-        info = chroma_service.get_collection_info(name)
-        if not info:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{name}' not found"
-            )
-
-        return VectorStoreInfo(
-            name=info['name'],
-            description=info['metadata'].get('description'),
-            count=info['count'],
-            modality=info['metadata'].get('modality'),
-            created_at=datetime.fromisoformat(info['metadata'].get('created_at', datetime.utcnow().isoformat())),
-            metadata=info['metadata']
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting vector store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/vector-stores/{name}/files")
-async def get_vector_store_files(name: str):
-    """Get all files/embeddings in a vector store."""
-    try:
-        if not chroma_service.collection_exists(name):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{name}' not found"
-            )
-
-        # Get all items from the collection
-        items = chroma_service.get_all_items(name)
-
-        # Group by file_id to avoid duplicates (since each file has multiple chunks)
-        files_dict = {}
-        for item_id, metadata in zip(items.get('ids', []), items.get('metadatas', [])):
-            file_id = metadata.get('file_id', item_id)
-            if file_id not in files_dict:
-                files_dict[file_id] = {
-                    'id': file_id,
-                    'filename': metadata.get('filename', 'unknown'),
-                    'modality': metadata.get('modality', 'unknown'),
-                    'timestamp': metadata.get('timestamp', datetime.utcnow().isoformat()),
-                    'metadata': metadata
-                }
-
-        return list(files_dict.values())
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting vector store files: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/vector-stores/{name}")
-async def delete_vector_store(name: str):
-    """Delete a vector store."""
-    try:
-        success = chroma_service.delete_collection(name)
-        if not success:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{name}' not found"
-            )
-
-        # Delete from SQLite database (CASCADE will delete related records)
-        database_service.delete_vector_store(name)
-
-        return {"success": True, "message": f"Vector store '{name}' deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting vector store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/upload", response_model=FileUploadResponse)
-async def upload_file(
-    file: UploadFile = File(...),
-    modality: ModalityType = Form(...)
-):
-    """Upload a file for embedding generation."""
-    try:
-        # Save file
-        result = await file_handler.save_upload_file(file, modality)
-        if not result:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to save file. Check file format and size."
-            )
-
-        file_id, file_path = result
-
-        return FileUploadResponse(
-            success=True,
-            file_id=file_id,
-            filename=file.filename,
-            modality=modality,
-            size=file_path.stat().st_size,
-            message="File uploaded successfully"
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/embed-folder")
-async def embed_folder(
-    files: list[UploadFile] = File(...),
-    vector_store: str = Form(...),
-    create_new: bool = Form(False)
-):
-    """Upload multiple files from a folder and generate embeddings."""
-    try:
-        # Create vector store if requested
-        if create_new:
-            if not chroma_service.collection_exists(vector_store):
-                chroma_service.create_collection(
-                    name=vector_store,
-                    description=f"Multi-modal vector store"
-                )
-                database_service.create_vector_store(
-                    name=vector_store,
-                    description=f"Multi-modal vector store"
-                )
-
-        # Check if vector store exists
-        if not chroma_service.collection_exists(vector_store):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
-            )
-
-        results = []
-        failed = []
-
-        for file in files:
-            try:
-                # Auto-detect modality from file extension
-                detected_modality = modality_detector.detect_modality(file.filename)
-
-                if not detected_modality:
-                    failed.append({
-                        'filename': file.filename,
-                        'error': 'Could not detect modality from file extension'
-                    })
-                    continue
-
-                modality = detected_modality.value
-
-                # Save file
-                modality_type = ModalityType(modality)
-                result = await file_handler.save_upload_file(file, modality_type)
-                if not result:
-                    failed.append({
-                        'filename': file.filename,
-                        'error': 'Failed to save file'
-                    })
-                    continue
-
-                file_id, file_path = result
-
-                # Generate embedding
-                embedding = None
-                if modality == 'text':
-                    content = file_path.read_text()
-                    embedding = imagebind_service.generate_text_embedding(content)
-                elif modality == 'image':
-                    embedding = imagebind_service.generate_image_embedding(str(file_path))
-                elif modality == 'video':
-                    embedding = imagebind_service.generate_video_embedding(str(file_path))
-                elif modality == 'audio':
-                    embedding = imagebind_service.generate_audio_embedding(str(file_path))
-                elif modality == 'depth':
-                    embedding = imagebind_service.generate_depth_embedding(str(file_path))
-                elif modality == 'thermal':
-                    embedding = imagebind_service.generate_thermal_embedding(str(file_path))
-                elif modality == 'imu':
-                    embedding = imagebind_service.generate_imu_embedding(str(file_path))
-
-                if embedding is None:
-                    failed.append({
-                        'filename': file.filename,
-                        'error': f'Failed to generate embedding for modality: {modality}'
-                    })
-                    continue
-
-                # Store embedding
-                metadata = {
-                    'file_id': file_id,
-                    'modality': modality,
-                    'filename': file.filename,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-
-                embedding_id = chroma_service.add_embedding(
-                    collection_name=vector_store,
-                    embedding=embedding,
-                    modality=modality,
-                    metadata=metadata
-                )
-
-                if embedding_id:
-                    # Record upload in SQLite database
-                    database_service.record_file_upload(
-                        file_id=file_id,
-                        embedding_id=embedding_id,
-                        filename=file.filename,
-                        modality=modality,
-                        size_bytes=file_path.stat().st_size,
-                        vector_store=vector_store
-                    )
-
-                    results.append({
-                        'filename': file.filename,
-                        'modality': modality,
-                        'embedding_id': embedding_id,
-                        'file_id': file_id
-                    })
-                else:
-                    failed.append({
-                        'filename': file.filename,
-                        'error': 'Failed to store embedding'
-                    })
-
-            except Exception as e:
-                failed.append({
-                    'filename': file.filename,
-                    'error': str(e)
-                })
-
+        try:
+            db_service.create_vault(name, description)
+        except ValueError:
+            pass  # already exists in SQLite (re-creation of chroma-only vault)
         return {
-            "success": len(results) > 0,
-            "message": f"Processed {len(results)}/{len(files)} files successfully",
-            "vector_store": vector_store,
-            "results": results,
-            "failed": failed,
-            "total_files": len(files),
-            "successful": len(results),
-            "failed_count": len(failed)
+            "success": True,
+            "store": store,
+            "api_key": plaintext_key,
+            "warning": "Save this API key now. It cannot be retrieved later.",
         }
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error embedding folder: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.get("/stores")
+async def list_stores(request: Request):
+    validate_admin_auth(request)
+    stores = chroma_service.list_collections()
+    # Enrich with file_count from SQLite (chroma's count is total embeddings, not files)
+    try:
+        sqlite_vaults = {v["name"]: v for v in db_service.list_vaults()}
+    except Exception:
+        sqlite_vaults = {}
+    for s in stores:
+        meta = sqlite_vaults.get(s["name"])
+        s["file_count"] = meta["file_count"] if meta else 0
+        if meta and meta.get("description") and not s.get("metadata", {}).get("description"):
+            s.setdefault("metadata", {})["description"] = meta["description"]
+    return {"stores": stores, "total": len(stores)}
+
+
+@router.get("/stores/{name}")
+async def get_store(request: Request, name: str):
+    validate_request_auth(request, name)
+    store = chroma_service.get_collection(name)
+    if not store:
+        raise HTTPException(status_code=404, detail=f"Store '{name}' not found")
+    return store
+
+
+@router.post("/stores/{name}/rotate-key")
+@limiter.limit(settings.rate_limit_stores)
+async def rotate_store_key(request: Request, name: str):
+    """Issue a new API key for a vault, replacing the old one. Returns plaintext."""
+    validate_request_auth(request, name)
+    if not chroma_service.get_collection(name):
+        raise HTTPException(status_code=404, detail=f"Store '{name}' not found")
+    plaintext, hashed = generate_api_key()
+    if not chroma_service.update_api_key_hash(name, hashed):
+        raise HTTPException(status_code=500, detail="Failed to rotate key")
+    return {"success": True, "store": name, "api_key": plaintext}
+
+
+@router.delete("/stores/{name}")
+async def delete_store(request: Request, name: str):
+    validate_request_auth(request, name)
+    if chroma_service.delete_collection(name):
+        store_dir = os.path.join(settings.upload_dir, name)
+        if os.path.exists(store_dir):
+            shutil.rmtree(store_dir, ignore_errors=True)
+        return {"success": True, "message": f"Deleted '{name}'"}
+    raise HTTPException(status_code=404, detail=f"Store '{name}' not found")
+
+
+# ── Document Management ──────────────────────────────────────────
+
+@router.delete("/stores/{name}/documents/{doc_id}")
+async def delete_document(request: Request, name: str, doc_id: str):
+    validate_request_auth(request, name)
+    if not chroma_service.get_collection(name):
+        raise HTTPException(status_code=404, detail=f"Store '{name}' not found")
+
+    count = chroma_service.delete_document(name, doc_id)
+    if count == 0:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+
+    pattern = os.path.join(settings.upload_dir, name, f"{doc_id}.*")
+    for filepath in glob.glob(pattern):
+        os.remove(filepath)
+
+    return {"success": True, "deleted_chunks": count, "doc_id": doc_id}
+
+
+# ── Embed ─────────────────────────────────────────────────────────
 
 @router.post("/embed")
-async def embed_file(
-    file: UploadFile = File(...),
-    modality: str = Form(...),
+@limiter.limit(settings.rate_limit_embed)
+async def embed(
+    request: Request,
     vector_store: str = Form(...),
-    create_new: bool = Form(False)
+    text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
 ):
-    """Upload file and generate embedding in one step."""
+    """Embed text or a file into a vault."""
+    validate_request_auth(request, vector_store)
+
+    if not text and not file:
+        raise HTTPException(status_code=400, detail="Provide either 'text' or 'file'")
+
+    if not chroma_service.get_collection(vector_store):
+        raise HTTPException(status_code=404, detail=f"Store '{vector_store}' not found")
+
+    doc_id = str(uuid.uuid4())
+
     try:
-        # Create vector store if requested
-        if create_new:
-            if not chroma_service.collection_exists(vector_store):
-                chroma_service.create_collection(
-                    name=vector_store,
-                    description=f"Vector store for {modality} embeddings"
-                )
-
-        # Check if vector store exists
-        if not chroma_service.collection_exists(vector_store):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
-            )
-
-        # Save file
-        modality_type = ModalityType(modality)
-        result = await file_handler.save_upload_file(file, modality_type)
-        if not result:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to save file. Check file format and size."
-            )
-
-        file_id, file_path = result
-
-        # Generate embedding
-        embedding = None
-        if modality == 'text':
-            # Read text content
-            content = file_path.read_text()
-            embedding = imagebind_service.generate_text_embedding(content)
-        elif modality == 'image':
-            embedding = imagebind_service.generate_image_embedding(str(file_path))
-        elif modality == 'video':
-            embedding = imagebind_service.generate_video_embedding(str(file_path))
-        elif modality == 'audio':
-            embedding = imagebind_service.generate_audio_embedding(str(file_path))
-        elif modality == 'depth':
-            embedding = imagebind_service.generate_depth_embedding(str(file_path))
-        elif modality == 'thermal':
-            embedding = imagebind_service.generate_thermal_embedding(str(file_path))
-        elif modality == 'imu':
-            embedding = imagebind_service.generate_imu_embedding(str(file_path))
-
-        if embedding is None:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to generate embedding for modality: {modality}"
-            )
-
-        # Store embedding
-        metadata = {
-            'file_id': file_id,
-            'modality': modality,
-            'filename': file.filename,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-
-        embedding_id = chroma_service.add_embedding(
-            collection_name=vector_store,
-            embedding=embedding,
-            modality=modality,
-            metadata=metadata
-        )
-
-        if not embedding_id:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to store embedding"
-            )
-
-        # Create embedding preview (first 10 values)
-        embedding_preview = embedding[:10].tolist() if len(embedding) >= 10 else embedding.tolist()
-
-        return {
-            "success": True,
-            "message": "File embedded successfully",
-            "embedding_id": embedding_id,
-            "vector_store": vector_store,
-            "modality": modality,
-            "filename": file.filename,
-            "embedding_preview": embedding_preview,
-            "embedding_shape": len(embedding)
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error embedding file: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/embeddings", response_model=EmbeddingResponse)
-async def generate_embedding(request: EmbeddingRequest):
-    """Generate and store embedding for uploaded file or text."""
-    try:
-        # Handle vector store operation
-        if request.operation == VectorStoreOperation.CREATE:
-            # This should be handled by creating the store first
-            raise HTTPException(
-                status_code=400,
-                detail="Please create vector store first using /vector-stores endpoint"
-            )
-
-        # Check if vector store exists
-        if not chroma_service.collection_exists(request.vector_store_name):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{request.vector_store_name}' not found"
-            )
-
-        # Generate embedding based on modality
-        embedding = None
-        file_path = None
-
-        if request.modality == ModalityType.TEXT:
-            if not request.text_content:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Text content required for text modality"
-                )
-            embedding = imagebind_service.generate_embedding(
-                modality='text',
-                text_content=request.text_content
-            )
+        if text:
+            return await _embed_text(vector_store, doc_id, text)
         else:
-            # Get file path
-            file_path = file_handler.get_file_path(request.file_id, request.modality)
-            if not file_path:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File not found: {request.file_id}"
-                )
-
-            # Generate embedding
-            embedding = imagebind_service.generate_embedding(
-                modality=request.modality.value,
-                file_path=file_path
-            )
-
-        if embedding is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate embedding"
-            )
-
-        # Store embedding in ChromaDB
-        metadata = request.metadata or {}
-        metadata['modality'] = request.modality.value
-        if file_path:
-            metadata['filename'] = file_path.name
-
-        embedding_id = chroma_service.add_embedding(
-            collection_name=request.vector_store_name,
-            embedding=embedding,
-            modality=request.modality.value,
-            metadata=metadata,
-            document=request.text_content if request.modality == ModalityType.TEXT else None
-        )
-
-        if not embedding_id:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to store embedding"
-            )
-
-        return EmbeddingResponse(
-            success=True,
-            message="Embedding generated and stored successfully",
-            embedding_id=embedding_id,
-            vector_store_name=request.vector_store_name,
-            modality=request.modality,
-            metadata=metadata
-        )
-
+            return await _embed_file(vector_store, doc_id, file)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating embedding: {e}")
+        logger.exception(f"Embedding failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/search-by-id", response_model=SearchResponse)
-async def search_similar(request: SearchRequest):
-    """Search for similar embeddings in a vector store using existing embedding ID or text."""
+async def _embed_text(vault: str, doc_id: str, text: str) -> dict:
+    """Embed raw text input — chunked and indexed into all 3 spaces."""
+    chunks_text = chunk_text(text) if len(text) > settings.chunk_size else [text]
+
+    timestamp = datetime.utcnow().isoformat()
+    items = [
+        {
+            "chunk_id": f"{doc_id}_chunk_{i}",
+            "text": ct,
+            "base_meta": {
+                "modality": "text",
+                "filename": "text_input",
+                "doc_id": doc_id,
+                "chunk_index": i,
+                "total_chunks": len(chunks_text),
+                "timestamp": timestamp,
+            },
+        }
+        for i, ct in enumerate(chunks_text)
+    ]
+    await _index_text_chunks(vault, items)
+
     try:
-        # Check if vector store exists
-        if not chroma_service.collection_exists(request.vector_store_name):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{request.vector_store_name}' not found"
-            )
+        rec = db_service.record_file(vault, "text_input", "text/plain", "text", doc_id, len(text.encode("utf-8")))
+        db_service.update_file_status(rec["id"], "indexed", chunk_count=len(chunks_text))
+    except Exception as _e:
+        logger.warning(f"db_service.record_file failed: {_e}")
 
-        # Generate query embedding
-        query_embedding = None
+    return {
+        "success": True,
+        "id": doc_id,
+        "modality": "text",
+        "filename": "text_input",
+        "chunks": len(chunks_text),
+        "dimensions": perception_service.EMBEDDING_DIM,
+        "store": vault,
+    }
 
-        if request.query_modality == ModalityType.TEXT:
-            if not request.query_text:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Query text required for text modality"
-                )
-            query_embedding = imagebind_service.generate_embedding(
-                modality='text',
-                text_content=request.query_text
-            )
-        else:
-            # Get file path
-            file_path = file_handler.get_file_path(request.query_file_id, request.query_modality)
-            if not file_path:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Query file not found: {request.query_file_id}"
-                )
 
-            # Generate embedding
-            query_embedding = imagebind_service.generate_embedding(
-                modality=request.query_modality.value,
-                file_path=file_path
-            )
-
-        if query_embedding is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate query embedding"
-            )
-
-        # Search in ChromaDB
-        results = chroma_service.search(
-            collection_name=request.vector_store_name,
-            query_embedding=query_embedding,
-            n_results=request.n_results,
-            include_metadata=request.include_metadata
+async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
+    """Dispatch a file to the right encoder + space."""
+    modality, mime_type = detect_modality(file.filename)
+    if not modality or not mime_type:
+        ext = os.path.splitext(file.filename)[1].lower()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: '{ext}'. Supported: {list(MIME_TYPES.keys())}",
         )
 
-        if results is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Search failed"
-            )
+    filename = sanitize_filename(file.filename)
+    file_bytes = await file.read()
+    _validate_file_size(file_bytes, filename)
+    file_url = _save_file(vault, doc_id, filename, file_bytes)
+    ext = os.path.splitext(filename)[1].lower()
 
-        # Format results
-        search_results = []
-        for i, result_id in enumerate(results['ids'][0]):
-            distance = float(results['distances'][0][i])
-            # Convert distance to similarity (1 - normalized distance)
-            # ChromaDB uses L2 distance, so we normalize it
-            similarity = 1.0 / (1.0 + distance)
+    base_meta = {
+        "modality": modality.value,
+        "filename": filename,
+        "mime_type": mime_type,
+        "file_url": file_url,
+        "doc_id": doc_id,
+        "size_bytes": len(file_bytes),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
-            metadata = results['metadatas'][0][i] if request.include_metadata else None
-            modality = metadata.get('modality', 'unknown') if metadata else 'unknown'
+    # Chunkable text-bearing modalities → text path
+    chunks = chunk_content(file_bytes, filename, modality.value)
 
-            # Construct file_path from metadata
-            file_path = None
-            if metadata and 'file_id' in metadata and 'modality' in metadata:
-                file_path = f"/api/uploads/{metadata['modality']}/{metadata['file_id']}"
-
-            search_results.append(SearchResult(
-                id=result_id,
-                similarity=similarity,
-                distance=distance,
-                modality=modality,
-                metadata=metadata,
-                rank=i + 1,
-                file_path=file_path
-            ))
-
-        # Record search analytics in SQLite
-        database_service.record_search(
-            vector_store=request.vector_store_name,
-            query_modality=request.query_modality.value,
-            query_text=request.query_text if request.query_modality == ModalityType.TEXT else None,
-            results_count=len(search_results)
-        )
-
-        return SearchResponse(
-            success=True,
-            results=search_results,
-            query_modality=request.query_modality.value,
-            vector_store=request.vector_store_name,
-            n_results=len(search_results)
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error searching: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/supported-formats")
-async def get_supported_formats():
-    """
-    Get all supported file formats for each modality.
-
-    Returns a dictionary mapping modality names to lists of supported file extensions.
-    """
-    try:
-        formats = modality_detector.get_all_supported_formats()
-        return {
-            "success": True,
-            "formats": formats,
-            "total_formats": sum(len(exts) for exts in formats.values())
-        }
-    except Exception as e:
-        logger.error(f"Error getting supported formats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/embed-auto")
-async def embed_file_auto(
-    file: UploadFile = File(...),
-    vector_store: str = Form(...),
-    create_new: bool = Form(False),
-    modality: Optional[str] = Form(None)
-):
-    """
-    Upload file and generate embedding with automatic modality detection.
-
-    If modality is not provided, it will be automatically detected from the file extension.
-    """
-    try:
-        # Auto-detect modality if not provided
-        if modality is None:
-            detected_modality = modality_detector.detect_modality(file.filename)
-            if detected_modality is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not detect modality for file '{file.filename}'. "
-                           f"Please specify modality explicitly or use a supported file format."
-                )
-            modality = detected_modality.value
-            logger.info(f"Auto-detected modality '{modality}' for file '{file.filename}'")
-
-        # Validate modality
-        try:
-            modality_type = ModalityType(modality)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid modality '{modality}'. Must be one of: {[m.value for m in ModalityType]}"
-            )
-
-        # Validate file extension matches modality
-        if not modality_detector.validate_file_for_modality(file.filename, modality_type):
-            supported_formats = modality_detector.get_supported_formats(modality_type)
-            raise HTTPException(
-                status_code=400,
-                detail=f"File extension does not match modality '{modality}'. "
-                       f"Supported formats: {supported_formats}"
-            )
-
-        # Create vector store if requested
-        if create_new:
-            if not chroma_service.collection_exists(vector_store):
-                chroma_service.create_collection(
-                    name=vector_store,
-                    description=f"Vector store for multi-modal embeddings"
-                )
-
-        # Check if vector store exists
-        if not chroma_service.collection_exists(vector_store):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
-            )
-
-        # Save file
-        result = await file_handler.save_upload_file(file, modality_type)
-        if not result:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to save file. Check file format and size."
-            )
-
-        file_id, file_path = result
-
-        # Generate embedding based on modality
-        embedding = None
-        if modality == 'text':
-            # Read text content
-            content = file_path.read_text()
-            embedding = imagebind_service.generate_text_embedding(content)
-        elif modality == 'image':
-            embedding = imagebind_service.generate_image_embedding(str(file_path))
-        elif modality == 'video':
-            embedding = imagebind_service.generate_video_embedding(str(file_path))
-        elif modality == 'audio':
-            embedding = imagebind_service.generate_audio_embedding(str(file_path))
-        elif modality == 'depth':
-            embedding = imagebind_service.generate_depth_embedding(str(file_path))
-        elif modality == 'thermal':
-            embedding = imagebind_service.generate_thermal_embedding(str(file_path))
-
-        if embedding is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate embedding"
-            )
-
-        # Store embedding
-        metadata = {
-            'modality': modality,
-            'filename': file.filename,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-
-        embedding_id = chroma_service.add_embedding(
-            collection_name=vector_store,
-            embedding=embedding,
-            modality=modality,
-            metadata=metadata
-        )
-
-        if not embedding_id:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to store embedding"
-            )
-
-        # Return response with embedding preview
-        return {
-            "success": True,
-            "embedding_id": embedding_id,
-            "file_id": file_id,
-            "filename": file.filename,
-            "modality": modality,
-            "auto_detected": modality is None,
-            "vector_store": vector_store,
-            "embedding_preview": embedding[:10].tolist() if len(embedding) >= 10 else embedding.tolist(),
-            "embedding_shape": len(embedding),
-            "message": f"Successfully generated {modality} embedding"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in embed_file_auto: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/embed-batch")
-async def embed_batch_files(
-    files: List[UploadFile] = File(...),
-    vector_store: str = Form(...),
-    create_new: bool = Form(False)
-):
-    """
-    Upload multiple files and generate embeddings with automatic modality detection.
-
-    Supports mixed modalities - e.g., upload .png, .pdf, .mp4 files together and
-    each will be routed to the appropriate model automatically.
-    """
-    try:
-        if not files:
-            raise HTTPException(
-                status_code=400,
-                detail="No files provided"
-            )
-
-        # Create vector store if requested
-        if create_new:
-            if not chroma_service.collection_exists(vector_store):
-                chroma_service.create_collection(
-                    name=vector_store,
-                    description=f"Vector store for multi-modal embeddings"
-                )
-
-        # Check if vector store exists
-        if not chroma_service.collection_exists(vector_store):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{vector_store}' not found. Set create_new=true to create it."
-            )
-
-        results = []
-        errors = []
-
-        for file in files:
-            try:
-                # Auto-detect modality
-                detected_modality = modality_detector.detect_modality(file.filename)
-                if detected_modality is None:
-                    errors.append({
-                        "filename": file.filename,
-                        "error": "Could not detect modality - unsupported file format"
-                    })
-                    continue
-
-                modality = detected_modality.value
-                logger.info(f"Processing '{file.filename}' as {modality}")
-
-                # Save file
-                result = await file_handler.save_upload_file(file, detected_modality)
-                if not result:
-                    errors.append({
-                        "filename": file.filename,
-                        "error": "Failed to save file"
-                    })
-                    continue
-
-                file_id, file_path = result
-
-                # Generate embedding based on modality
-                embedding = None
-                if modality == 'text':
-                    content = file_path.read_text()
-                    embedding = imagebind_service.generate_text_embedding(content)
-                elif modality == 'image':
-                    embedding = imagebind_service.generate_image_embedding(str(file_path))
-                elif modality == 'video':
-                    embedding = imagebind_service.generate_video_embedding(str(file_path))
-                elif modality == 'audio':
-                    embedding = imagebind_service.generate_audio_embedding(str(file_path))
-                elif modality == 'depth':
-                    embedding = imagebind_service.generate_depth_embedding(str(file_path))
-                elif modality == 'thermal':
-                    embedding = imagebind_service.generate_thermal_embedding(str(file_path))
-
-                if embedding is None:
-                    errors.append({
-                        "filename": file.filename,
-                        "error": "Failed to generate embedding"
-                    })
-                    continue
-
-                # Store embedding
-                metadata = {
-                    'modality': modality,
-                    'filename': file.filename,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-
-                embedding_id = chroma_service.add_embedding(
-                    collection_name=vector_store,
-                    embedding=embedding,
-                    modality=modality,
-                    metadata=metadata
-                )
-
-                if not embedding_id:
-                    errors.append({
-                        "filename": file.filename,
-                        "error": "Failed to store embedding"
-                    })
-                    continue
-
-                # Success!
-                results.append({
-                    "success": True,
-                    "embedding_id": embedding_id,
-                    "file_id": file_id,
-                    "filename": file.filename,
-                    "modality": modality,
-                    "embedding_preview": embedding[:10].tolist() if len(embedding) >= 10 else embedding.tolist(),
-                    "embedding_shape": len(embedding)
-                })
-
-            except Exception as e:
-                logger.error(f"Error processing file '{file.filename}': {e}")
-                errors.append({
-                    "filename": file.filename,
-                    "error": str(e)
-                })
-
-        return {
-            "success": len(results) > 0,
-            "total_files": len(files),
-            "successful": len(results),
-            "failed": len(errors),
-            "results": results,
-            "errors": errors,
-            "vector_store": vector_store
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in embed_batch_files: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/search", response_model=SearchResponse)
-async def search_vector_store(
-    file: UploadFile = File(...),
-    vector_store: str = Form(...),
-    modality: Optional[str] = Form(None),
-    n_results: int = Form(10),
-    filter_modality: Optional[str] = Form(None)
-):
-    """
-    Cross-modal search: Upload a query file (text/image/video/audio/depth/thermal)
-    and find similar items in the vector store.
-
-    This implements cross-modal retrieval using LanguageBind's shared embedding space.
-    For example:
-    - Upload an image to find similar images, videos, or text descriptions
-    - Upload text to find relevant images, videos, or audio
-    - Upload audio to find related videos or images
-
-    Args:
-        file: Query file (any supported modality)
-        vector_store: Name of the vector store to search
-        modality: Optional explicit modality (auto-detected if not provided)
-        n_results: Number of results to return (default: 10)
-        filter_modality: Optional filter to only return results of specific modality
-
-    Returns:
-        SearchResponse with ranked results and similarity scores
-    """
-    try:
-        # Validate vector store exists
-        if not chroma_service.collection_exists(vector_store):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{vector_store}' not found"
-            )
-
-        # Auto-detect or validate modality
-        if modality is None:
-            detected_modality = modality_detector.detect_modality(file.filename)
-            if detected_modality is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Could not detect modality for file '{file.filename}'. Please specify modality explicitly."
-                )
-            modality_type = detected_modality
-            logger.info(f"Auto-detected modality '{modality_type.value}' for query file '{file.filename}'")
-        else:
-            try:
-                modality_type = ModalityType(modality)
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid modality: {modality}. Must be one of: text, image, video, audio, depth, thermal, imu"
-                )
-
-            # Validate file extension matches modality
-            if not modality_detector.validate_file_for_modality(file.filename, modality_type):
-                supported_formats = modality_detector.get_supported_formats(modality_type)
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"File extension does not match modality '{modality}'. Supported formats: {supported_formats}"
-                )
-
-        # Save uploaded query file temporarily
-        result = await file_handler.save_upload_file(file, modality_type)
-        if not result:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to save query file"
-            )
-
-        file_id, file_path = result
+    if chunks:
+        items = []
+        for i, chunk in enumerate(chunks):
+            meta = {**base_meta, "chunk_index": i, "total_chunks": len(chunks)}
+            if "page_numbers" in chunk:
+                meta["page_numbers"] = chunk["page_numbers"]
+            if "section" in chunk:
+                meta["section"] = chunk["section"]
+            items.append({
+                "chunk_id": f"{doc_id}_chunk_{i}",
+                "text": chunk["text"],
+                "base_meta": meta,
+            })
+        await _index_text_chunks(vault, items)
 
         try:
-            # Generate embedding for query file
-            logger.info(f"Generating query embedding for {modality_type.value} file: {file.filename}")
-
-            if modality_type == ModalityType.TEXT:
-                # Read text content
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    text_content = f.read()
-                query_embedding = imagebind_service.generate_text_embedding(text_content)
-            elif modality_type == ModalityType.IMAGE:
-                query_embedding = imagebind_service.generate_image_embedding(str(file_path))
-            elif modality_type == ModalityType.VIDEO:
-                query_embedding = imagebind_service.generate_video_embedding(str(file_path))
-            elif modality_type == ModalityType.AUDIO:
-                query_embedding = imagebind_service.generate_audio_embedding(str(file_path))
-            elif modality_type == ModalityType.DEPTH:
-                query_embedding = imagebind_service.generate_depth_embedding(str(file_path))
-            elif modality_type == ModalityType.THERMAL:
-                query_embedding = imagebind_service.generate_thermal_embedding(str(file_path))
-            elif modality_type == ModalityType.IMU:
-                query_embedding = imagebind_service.generate_imu_embedding(str(file_path))
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported modality: {modality_type.value}"
-                )
-
-            logger.info(f"Generated query embedding with shape: {query_embedding.shape}")
-
-            # Prepare metadata filter if specified
-            where_filter = None
-            if filter_modality:
-                try:
-                    filter_mod = ModalityType(filter_modality)
-                    where_filter = {"modality": filter_mod.value}
-                    logger.info(f"Filtering results to modality: {filter_mod.value}")
-                except ValueError:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid filter_modality: {filter_modality}"
-                    )
-
-            # Search in vector store
-            search_results = chroma_service.search(
-                collection_name=vector_store,
-                query_embedding=query_embedding,
-                n_results=n_results,
-                where=where_filter,
-                include_metadata=True
-            )
-
-            if search_results is None:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Search failed"
-                )
-
-            # Format results
-            results = []
-            ids = search_results['ids'][0]
-            distances = search_results['distances'][0]
-            metadatas = search_results.get('metadatas', [[]])[0]
-
-            for i, (result_id, distance, metadata) in enumerate(zip(ids, distances, metadatas)):
-                # Convert distance to similarity score (cosine similarity)
-                # ChromaDB uses L2 distance by default, convert to similarity
-                # similarity = 1 / (1 + distance)
-                similarity = 1.0 - (distance / 2.0)  # Normalize to [0, 1]
-
-                # Construct file_path from metadata
-                file_path = None
-                if metadata and 'file_id' in metadata and 'modality' in metadata:
-                    file_path = f"/api/uploads/{metadata['modality']}/{metadata['file_id']}"
-
-                results.append(SearchResult(
-                    id=result_id,
-                    similarity=float(similarity),
-                    distance=float(distance),
-                    modality=metadata.get('modality', 'unknown'),
-                    metadata=metadata,
-                    rank=i + 1,
-                    file_path=file_path
-                ))
-
-            logger.info(f"Search completed: found {len(results)} results")
-
-            return SearchResponse(
-                success=True,
-                query_modality=modality_type.value,
-                vector_store=vector_store,
-                n_results=len(results),
-                results=results,
-                filter_modality=filter_modality
-            )
-
-        finally:
-            # Clean up temporary query file
-            file_handler.delete_file(file_id, modality_type)
-            logger.info(f"Cleaned up temporary query file: {file_id}")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in search_vector_store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/uploads/{modality}/{file_id}")
-async def serve_uploaded_file(modality: str, file_id: str):
-    """Serve uploaded files for viewing/downloading."""
-    try:
-        # Convert modality string to ModalityType
-        try:
-            modality_type = ModalityType(modality.lower())
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid modality: {modality}"
-            )
-
-        # Get file path
-        file_path = file_handler.get_file_path(file_id, modality_type)
-
-        if not file_path or not file_path.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"File not found: {file_id}"
-            )
-
-        # Determine media type based on file extension
-        media_types = {
-            '.txt': 'text/plain',
-            '.json': 'application/json',
-            '.md': 'text/markdown',
-            '.pdf': 'application/pdf',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.bmp': 'image/bmp',
-            '.mp4': 'video/mp4',
-            '.avi': 'video/x-msvideo',
-            '.mov': 'video/quicktime',
-            '.mkv': 'video/x-matroska',
-            '.wav': 'audio/wav',
-            '.mp3': 'audio/mpeg',
-            '.flac': 'audio/flac',
-            '.m4a': 'audio/mp4',
-        }
-
-        file_ext = file_path.suffix.lower()
-        media_type = media_types.get(file_ext, 'application/octet-stream')
-
-        return FileResponse(
-            path=str(file_path),
-            media_type=media_type,
-            filename=file_path.name
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error serving file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Analytics Endpoints ====================
-
-@router.get("/analytics/overview")
-async def get_analytics_overview():
-    """Get system-wide analytics overview."""
-    try:
-        stats = database_service.get_system_stats()
-        return {
-            "success": True,
-            "stats": stats
-        }
-    except Exception as e:
-        logger.error(f"Error getting analytics overview: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/analytics/searches")
-async def get_search_analytics(
-    vector_store: Optional[str] = None,
-    days: int = 7
-):
-    """Get search analytics for a specific store or all stores."""
-    try:
-        stats = database_service.get_search_stats(vector_store=vector_store, days=days)
-        return {
-            "success": True,
-            "vector_store": vector_store or "all",
-            "stats": stats
-        }
-    except Exception as e:
-        logger.error(f"Error getting search analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/analytics/store/{name}")
-async def get_store_analytics(name: str):
-    """Get detailed analytics for a specific vector store."""
-    try:
-        # Check if store exists
-        if not chroma_service.collection_exists(name):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Vector store '{name}' not found"
-            )
-
-        file_count = database_service.get_store_file_count(name)
-        size_bytes = database_service.get_store_size(name)
-        modality_counts = database_service.get_store_modality_counts(name)
-        search_stats = database_service.get_search_stats(vector_store=name, days=30)
+            rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
+            db_service.update_file_status(rec["id"], "indexed", chunk_count=len(chunks))
+        except Exception as _e:
+            logger.warning(f"db_service.record_file failed: {_e}")
 
         return {
             "success": True,
-            "vector_store": name,
-            "analytics": {
-                "file_count": file_count,
-                "size_bytes": size_bytes,
-                "modality_counts": modality_counts,
-                "search_stats_30_days": search_stats
+            "id": doc_id,
+            "modality": modality.value,
+            "filename": filename,
+            "chunks": len(chunks),
+            "dimensions": perception_service.EMBEDDING_DIM,
+            "store": vault,
+            "file_url": file_url,
+        }
+
+    # Non-chunkable: image, audio, video, or text fallback.
+    # NOTE: deliberately don't set document_text here — let chroma_service's
+    # _document_text_for_chunk() generate a humanized form from the filename
+    # so the cross-encoder reranker has real content to score.
+    chunk_id = f"{doc_id}_chunk_0"
+    base_meta.update({"chunk_index": 0, "total_chunks": 1})
+
+    if modality == ModalityType.IMAGE:
+        # Caption once per image — gives the cross-encoder reranker real prose
+        # to score against (the synthesized "image eiffel tower" loses to any
+        # speech transcript on length bias).
+        caption = await asyncio.to_thread(image_captioner.caption_image, file_bytes)
+
+        # Tile the image: full + 4 quadrants → 5 vectors. Region-level recall
+        # for queries targeting a specific element of a busy/wide image.
+        tiles = await asyncio.to_thread(perception_service.encode_image_tiles, file_bytes)
+        for i, t in enumerate(tiles):
+            is_full = t["region"] == "full"
+            tmeta = {
+                **base_meta,
+                "chunk_index": i,
+                "total_chunks": len(tiles),
+                "region": t["region"],
+                "bbox": str(t["bbox"]),  # chroma metadata only accepts scalars
+                "is_full_image": is_full,
             }
+            # Only the full-image chunk gets the caption — quadrant captions
+            # would be misleading without a region-aware captioner.
+            if is_full and caption:
+                tmeta["document_text"] = caption
+                tmeta["caption"] = caption
+            cid = f"{doc_id}_chunk_{i}"
+            chroma_service.add_embedding(vault, "image", cid, t["embedding"], tmeta)
+        n_chunks = len(tiles)
+        if caption:
+            logger.info(f"image captioned: {filename!r} → {caption!r}")
+    elif modality == ModalityType.AUDIO:
+        # Acoustic chunks: each window is a bounded time-range, retrievable via PE-AV.
+        # Good for non-speech queries ("thunder", "piano music").
+        windows = await asyncio.to_thread(
+            perception_service.encode_audio_windows, file_bytes, ext or ".wav"
+        )
+        for i, w in enumerate(windows):
+            wmeta = {
+                **base_meta,
+                "chunk_index": i,
+                "total_chunks": len(windows),
+                "start_sec": w["start_sec"],
+                "end_sec": w["end_sec"],
+                "audio_track": "acoustic",
+            }
+            cid = f"{doc_id}_chunk_{i}"
+            chroma_service.add_embedding(vault, "audio", cid, w["embedding"], wmeta)
+
+        # Speech transcription: PE-AV doesn't read the words. Transcribe the
+        # audio and write each segment ONLY to the audio space (via
+        # text-for-audio projection) so spoken content is searchable without
+        # polluting image/video retrieval. BM25 still picks up the literal
+        # text for lexical matching.
+        transcript = await asyncio.to_thread(asr_service.transcribe_audio, file_bytes, ext or ".wav")
+        n_speech = 0
+        if transcript:
+            speech_texts = [(seg.get("text") or "").strip() for seg in transcript]
+            speech_texts = [t for t in speech_texts if len(t) >= 8]
+            if speech_texts:
+                # Batch text-for-audio embeddings (one network call instead of N)
+                embs = await asyncio.to_thread(
+                    perception_service.encode_text_for_audio_batch, speech_texts
+                )
+                kept_segments = [seg for seg, t in zip(transcript, [(s.get("text") or "").strip() for s in transcript]) if len(t) >= 8]
+                for j, (seg, text, emb) in enumerate(zip(kept_segments, speech_texts, embs)):
+                    cid = f"{doc_id}_speech_{j}"
+                    smeta = {
+                        **base_meta,
+                        "audio_track": "speech",
+                        "chunk_index": len(windows) + j,
+                        "total_chunks_speech": len(speech_texts),
+                        "start_sec": seg.get("start_sec"),
+                        "end_sec": seg.get("end_sec"),
+                        "transcript": text,
+                    }
+                    chroma_service.add_chunks(vault, "audio", [{
+                        "id": cid,
+                        "embedding": emb,
+                        "metadata": {**smeta, "space": "audio"},
+                        "text": text,
+                    }])
+                n_speech = len(speech_texts)
+        n_chunks = len(windows) + n_speech
+        logger.info(f"audio indexed: {len(windows)} acoustic + {n_speech} speech chunks for {filename}")
+    elif modality == ModalityType.VIDEO:
+        # Sliding-window video — same shape as audio: each chunk is a bounded
+        # time-range. Long clips become individually retrievable segments.
+        windows = await asyncio.to_thread(
+            perception_service.encode_video_windows, file_bytes, ext or ".mp4"
+        )
+        for i, w in enumerate(windows):
+            wmeta = {
+                **base_meta,
+                "chunk_index": i,
+                "total_chunks": len(windows),
+                "start_sec": w["start_sec"],
+                "end_sec": w["end_sec"],
+            }
+            cid = f"{doc_id}_chunk_{i}"
+            chroma_service.add_embedding(vault, "video", cid, w["embedding"], wmeta)
+        n_chunks = len(windows)
+    elif modality == ModalityType.TEXT:
+        # Text fallback (e.g. empty chunker result); index once
+        text_content = file_bytes.decode("utf-8", errors="replace")
+        base_meta["document_text"] = text_content[:1000]
+        await _index_text_chunk(vault, chunk_id, text_content[:settings.chunk_size], base_meta)
+        n_chunks = 1
+    else:
+        raise HTTPException(status_code=400, detail=f"No encoder for modality '{modality.value}'")
+
+    try:
+        rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
+        db_service.update_file_status(rec["id"], "indexed", chunk_count=n_chunks)
+    except Exception as _e:
+        logger.warning(f"db_service.record_file failed: {_e}")
+
+    return {
+        "success": True,
+        "id": doc_id,
+        "modality": modality.value,
+        "filename": filename,
+        "chunks": n_chunks,
+        "dimensions": perception_service.EMBEDDING_DIM,
+        "store": vault,
+        "file_url": file_url,
+    }
+
+
+@router.post("/embed/batch")
+@limiter.limit(settings.rate_limit_embed)
+async def embed_batch(
+    request: Request,
+    vector_store: str = Form(...),
+    files: List[UploadFile] = File(...),
+):
+    """Embed multiple files at once."""
+    validate_request_auth(request, vector_store)
+
+    if not chroma_service.get_collection(vector_store):
+        raise HTTPException(status_code=404, detail=f"Store '{vector_store}' not found")
+
+    results = []
+    for file in files:
+        try:
+            doc_id = str(uuid.uuid4())
+            result = await _embed_file(vector_store, doc_id, file)
+            results.append({
+                "filename": result["filename"],
+                "success": True,
+                "id": result["id"],
+                "modality": result["modality"],
+                "chunks": result["chunks"],
+            })
+        except HTTPException as e:
+            results.append({"filename": file.filename, "success": False, "error": e.detail})
+        except Exception as e:
+            results.append({"filename": file.filename, "success": False, "error": str(e)})
+
+    succeeded = sum(1 for r in results if r.get("success"))
+    return {"success": True, "total": len(files), "succeeded": succeeded, "results": results}
+
+
+# ── Retrieval pipeline ──────────────────────────────────────────
+
+async def _smart_text_retrieve(
+    vault: str,
+    query: str,
+    top_k: int,
+    min_similarity: float = 0.0,
+    *,
+    use_bm25: bool = True,
+    use_mmr: bool = True,
+    mmr_lambda: float = 0.5,
+    use_rerank: bool = True,
+    pool_size: int = 50,
+    rrf_k: int = 60,
+) -> List[Dict]:
+    """Pipeline: dense × 3 PE spaces + BM25 → RRF → cross-encoder rerank → MMR (text diversity) → top-K."""
+    embeds = await asyncio.to_thread(perception_service.encode_text_all, query)
+    per_space = {}
+    for space, embed in embeds.items():
+        # Speech-derived chunks live in the audio space but are text-for-audio
+        # projections of transcript text. Comparing those to a text query in
+        # the same projection is text-text in a non-text space — unreliable.
+        # Exclude them from dense retrieval; BM25 still catches them lexically
+        # via list_all_chunks below.
+        where = {"audio_track": {"$ne": "speech"}} if space == "audio" else None
+        hits = chroma_service.search_space_pool(vault, space, embed, pool_size,
+                                                include_embeddings=False,
+                                                where=where)
+        for h in hits:
+            h["space"] = space
+        per_space[space] = hits
+
+    if use_bm25:
+        bm25_hits = bm25_service.search(
+            vault, query,
+            chunks_provider=chroma_service.list_all_chunks,
+            n_results=pool_size,
+        )
+        for h in bm25_hits:
+            h["space"] = "bm25"
+        per_space["bm25"] = bm25_hits
+
+    merged = chroma_service._rrf_merge(per_space, k=rrf_k)
+    if min_similarity > 0:
+        merged = [h for h in merged if h.get("similarity", 0) >= min_similarity]
+    if not merged:
+        return []
+
+    # Cross-encoder rerank over a generous candidate set first
+    rerank_pool = max(top_k * 4, 20)
+    if use_rerank and reranker_service.is_ready():
+        try:
+            merged = await asyncio.to_thread(
+                reranker_service.rerank, query, merged[:rerank_pool], top_k=rerank_pool
+            )
+        except Exception as e:
+            logger.warning(f"Reranker failed, falling back to RRF order: {e}")
+            merged = merged[:rerank_pool]
+    else:
+        merged = merged[:rerank_pool]
+
+    # MMR diversifies on the reranker-ordered list using text overlap
+    if use_mmr:
+        relevance_key = "rerank_score" if (use_rerank and reranker_service.is_ready()) else "rrf_score"
+        merged = chroma_service.mmr_select(merged, k=top_k, lambda_=mmr_lambda,
+                                           relevance_key=relevance_key)
+    else:
+        merged = merged[:top_k]
+    return merged
+
+
+# ── Search ────────────────────────────────────────────────────────
+
+@router.post("/search")
+@limiter.limit(settings.rate_limit_search)
+async def search(
+    request: Request,
+    vector_store: str = Form(...),
+    query: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    n_results: int = Form(10),
+    min_similarity: float = Form(0.0),
+):
+    """Search a vault by text or by file (modality auto-detected)."""
+    validate_request_auth(request, vector_store)
+
+    if not query and not file:
+        raise HTTPException(status_code=400, detail="Provide either 'query' (text) or 'file'")
+
+    if not chroma_service.get_collection(vector_store):
+        raise HTTPException(status_code=404, detail=f"Store '{vector_store}' not found")
+
+    try:
+        if query:
+            results = await _smart_text_retrieve(vector_store, query, n_results, min_similarity)
+            query_info = {"type": "text", "query": query}
+        else:
+            modality, mime_type = detect_modality(file.filename)
+            if not modality or not mime_type:
+                raise HTTPException(status_code=400, detail="Unsupported file type")
+
+            file_bytes = await file.read()
+            ext = os.path.splitext(file.filename)[1].lower()
+
+            if modality == ModalityType.IMAGE:
+                emb = await asyncio.to_thread(perception_service.encode_image, file_bytes)
+                results = chroma_service.search_space(vector_store, "image", emb, n_results, min_similarity)
+            elif modality == ModalityType.AUDIO:
+                emb = await asyncio.to_thread(perception_service.encode_audio, file_bytes, ext=ext or ".wav")
+                results = chroma_service.search_space(vector_store, "audio", emb, n_results, min_similarity)
+            elif modality == ModalityType.VIDEO:
+                emb = await asyncio.to_thread(perception_service.encode_video, file_bytes, ext=ext or ".mp4")
+                results = chroma_service.search_space(vector_store, "video", emb, n_results, min_similarity)
+            elif modality == ModalityType.TEXT:
+                text_content = file_bytes.decode("utf-8", errors="replace")[:settings.chunk_size]
+                results = await _smart_text_retrieve(vector_store, text_content, n_results, min_similarity)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported query modality '{modality.value}'")
+
+            query_info = {"type": modality.value, "filename": file.filename}
+
+        return {
+            "success": True,
+            "query": query_info,
+            "store": vector_store,
+            "count": len(results),
+            "results": results,
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting store analytics: {e}")
+        logger.exception(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── RAG Retrieve ──────────────────────────────────────────────────
+
+@router.post("/retrieve")
+@limiter.limit(settings.rate_limit_search)
+async def retrieve(request: Request):
+    """RAG-optimized retrieval. JSON body: {store, query, top_k, min_similarity}."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    store_name = body.get("store")
+    query = body.get("query")
+    top_k = body.get("top_k", 5)
+    min_similarity = body.get("min_similarity", 0.0)
+
+    if not store_name or not query:
+        raise HTTPException(status_code=400, detail="Both 'store' and 'query' are required")
+
+    validate_request_auth(request, store_name)
+
+    if not chroma_service.get_collection(store_name):
+        raise HTTPException(status_code=404, detail=f"Store '{store_name}' not found")
+
+    try:
+        results = await _smart_text_retrieve(store_name, query, top_k, min_similarity)
+
+        context = []
+        for r in results:
+            meta = r.get("metadata", {})
+            item = {
+                "text": r.get("document", ""),
+                "source": meta.get("filename", "unknown"),
+                "modality": meta.get("modality", ""),
+                "matched_space": r.get("space", ""),
+                "relevance": r.get("similarity", 0),
+            }
+            if "page_numbers" in meta:
+                item["page"] = meta["page_numbers"]
+            if "section" in meta:
+                item["section"] = meta["section"]
+            if "chunk_index" in meta:
+                item["chunk"] = meta["chunk_index"]
+            if "file_url" in meta:
+                item["file_url"] = meta["file_url"]
+            context.append(item)
+
+        return {"context": context}
+    except Exception as e:
+        logger.exception(f"Retrieve failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Auth-gated file serving ──────────────────────────────────────
+
+@router.get("/files/{store_name}/{filename}")
+async def get_file(request: Request, store_name: str, filename: str):
+    """Serve an uploaded file. Requires the same auth as the parent vault.
+
+    Accepts either the X-API-Key header or `?api_key=...` (for <img>/<video>
+    src attributes that can't set headers).
+    """
+    validate_request_auth(request, store_name)
+
+    # Strict path containment: resolve realpath and check it stays inside upload_dir
+    base_dir = os.path.realpath(settings.upload_dir)
+    target = os.path.realpath(os.path.join(base_dir, store_name, filename))
+    if not (target == base_dir or target.startswith(base_dir + os.sep)):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(target)
+
+
+# ── Supported Formats ────────────────────────────────────────────
+
+@router.get("/formats")
+async def get_formats():
+    by_modality = {}
+    for ext, modality in EXTENSION_TO_MODALITY.items():
+        by_modality.setdefault(modality.value, []).append(ext)
+    return {"formats": by_modality}
+
+
+# ── Vault Metadata (SQLite) ──────────────────────────────────────
+
+@router.get("/vaults")
+async def list_vaults_endpoint(request: Request):
+    """Rich list of vaults with description, timestamps, and file_count."""
+    validate_admin_auth(request)
+    vaults = db_service.list_vaults()
+    return {"vaults": vaults, "total": len(vaults)}
+
+
+@router.get("/vaults/{name}")
+async def get_vault_endpoint(request: Request, name: str):
+    """Full detail for a single vault (includes file_count)."""
+    validate_request_auth(request, name)
+    vault = db_service.get_vault(name)
+    if not vault:
+        raise HTTPException(status_code=404, detail=f"Vault '{name}' not found")
+    return vault
+
+
+@router.get("/vaults/{name}/files")
+async def list_vault_files_endpoint(request: Request, name: str, status: Optional[str] = None):
+    """List files in a vault, optionally filtered by status."""
+    validate_request_auth(request, name)
+    if not db_service.get_vault(name):
+        raise HTTPException(status_code=404, detail=f"Vault '{name}' not found")
+    try:
+        files = db_service.list_files(name, status=status)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    return {"vault": name, "status_filter": status, "count": len(files), "files": files}
+
+
+@router.post("/vaults/{name}/files/{file_id}/retry")
+async def retry_vault_file_endpoint(request: Request, name: str, file_id: str):
+    """Mark a failed file as queued so it can be retried later (v1: status flip only)."""
+    validate_request_auth(request, name)
+    if not db_service.get_vault(name):
+        raise HTTPException(status_code=404, detail=f"Vault '{name}' not found")
+
+    file_row = db_service.get_file(file_id)
+    if not file_row:
+        raise HTTPException(status_code=404, detail=f"File '{file_id}' not found")
+
+    if not db_service.update_file_status(file_id, "queued", error=""):
+        raise HTTPException(status_code=500, detail="Failed to update file status")
+
+    return {"success": True, "file_id": file_id, "status": "queued"}

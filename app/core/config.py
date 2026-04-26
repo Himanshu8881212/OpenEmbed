@@ -1,5 +1,5 @@
 """
-Application configuration management using Pydantic Settings.
+Application configuration.
 """
 from typing import List
 from pydantic_settings import BaseSettings
@@ -11,110 +11,67 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
     # Application
-    app_name: str = Field(default="OpenEmbed", env="APP_NAME")
-    app_version: str = Field(default="1.0.0", env="APP_VERSION")
+    app_name: str = Field(default="EMBEd", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
 
     # Server
     host: str = Field(default="0.0.0.0", env="HOST")
     port: int = Field(default=8000, env="PORT")
-    workers: int = Field(default=4, env="WORKERS")
 
-    # Model Configuration
-    cache_dir: str = Field(default="./cache_dir", env="CACHE_DIR")
-    model_cache_dir: str = Field(default="./model_cache", env="MODEL_CACHE_DIR")
-    device: str = Field(default="auto", env="DEVICE")  # auto, cpu, cuda, cuda:0, mps
+    # Perception Encoder (Meta) — image+text via PE-Core, audio+video+text via PE-AV
+    pe_core_model: str = Field(default="PE-Core-L14-336", env="PE_CORE_MODEL")
+    pe_av_model: str = Field(default="facebook/pe-av-large", env="PE_AV_MODEL")
+    embedding_dimensions: int = Field(default=1024, env="EMBEDDING_DIMENSIONS")
+
+    # PE inference dtype: "float16" (default on MPS/CUDA), "bfloat16", or "float32".
+    # Public API still returns float32 lists; this only controls on-device math.
+    pe_dtype: str = Field(default="float16", env="PE_DTYPE")
+    # If true, defer PE-AV (~8GB) until first audio/video request. Default eager.
+    pe_av_lazy: bool = Field(default=False, env="PE_AV_LAZY")
+    # If true, wrap PE-Core / PE-AV with torch.compile(mode="reduce-overhead").
+    # Big speedup on hot paths but variable-shape inputs (audio duration, batch
+    # size) will trigger recompiles. Off by default for predictable latency.
+    pe_compile: bool = Field(default=False, env="PE_COMPILE")
 
     # ChromaDB
     chroma_persist_dir: str = Field(default="./chroma_db", env="CHROMA_PERSIST_DIR")
-    chroma_host: str = Field(default="localhost", env="CHROMA_HOST")
-    chroma_port: int = Field(default=8001, env="CHROMA_PORT")
 
-    # Upload Configuration
-    max_file_size: int = Field(default=500_000_000, env="MAX_FILE_SIZE")  # 500MB
+    # SQLite metadata layer (vaults + files)
+    sqlite_path: str = Field(default="./embed.db", env="SQLITE_PATH")
+
+    # Upload
+    max_file_size: int = Field(default=100_000_000, env="MAX_FILE_SIZE")  # 100MB
     upload_dir: str = Field(default="./uploads", env="UPLOAD_DIR")
 
-    # Text formats - documents and plain text
-    # Note: .csv and .json removed to avoid conflict with IMU data
-    allowed_text_formats: List[str] = Field(
-        default=[".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt"],
-        env="ALLOWED_TEXT_FORMATS"
-    )
+    # Authentication
+    admin_api_key: str = Field(default="", env="ADMIN_API_KEY")
 
-    # Video formats - common video containers
-    allowed_video_formats: List[str] = Field(
-        default=[".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg"],
-        env="ALLOWED_VIDEO_FORMATS"
-    )
+    # Chunking — PE-AV text uses ModernBERT (long context), only PE-Core image
+    # text is CLIP-style 32-token. Larger chunks improve PE-AV recall and the
+    # PE-Core image path silently truncates — net win for retrieval quality.
+    chunk_size: int = Field(default=600, env="CHUNK_SIZE")  # ~150 ModernBERT tokens
 
-    # Audio formats - common audio formats
-    allowed_audio_formats: List[str] = Field(
-        default=[".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus"],
-        env="ALLOWED_AUDIO_FORMATS"
-    )
+    # Rate Limiting
+    rate_limit_embed: str = Field(default="30/minute", env="RATE_LIMIT_EMBED")
+    rate_limit_search: str = Field(default="60/minute", env="RATE_LIMIT_SEARCH")
+    rate_limit_stores: str = Field(default="10/minute", env="RATE_LIMIT_STORES")
 
-    # Image formats - standard image formats
-    allowed_image_formats: List[str] = Field(
-        default=[".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif", ".webp", ".svg"],
-        env="ALLOWED_IMAGE_FORMATS"
-    )
-
-    # Depth map formats - depth data formats
-    # .png is supported but requires explicit modality specification (defaults to image)
-    # Note: .npy/.npz removed to avoid conflict with IMU data
-    allowed_depth_formats: List[str] = Field(
-        default=[".png", ".exr", ".pfm"],
-        env="ALLOWED_DEPTH_FORMATS"
-    )
-
-    # Thermal image formats - thermal imaging formats
-    # .jpg/.jpeg/.png are supported but require explicit modality specification (default to image)
-    allowed_thermal_formats: List[str] = Field(
-        default=[".jpg", ".jpeg", ".png", ".tiff", ".tif"],
-        env="ALLOWED_THERMAL_FORMATS"
-    )
-
-    # IMU (Inertial Measurement Unit) formats - sensor data formats
-    # IMU data typically contains accelerometer and gyroscope measurements
-    allowed_imu_formats: List[str] = Field(
-        default=[".csv", ".json", ".npy", ".npz", ".pkl", ".h5", ".hdf5"],
-        env="ALLOWED_IMU_FORMATS"
-    )
-
-    # Security
-    secret_key: str = Field(default="change-me-in-production", env="SECRET_KEY")
+    # CORS
     cors_origins: List[str] = Field(
         default=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"],
         env="CORS_ORIGINS"
     )
 
-    # Rate Limiting
-    rate_limit_per_minute: int = Field(default=30, env="RATE_LIMIT_PER_MINUTE")
-
     class Config:
         env_file = ".env"
         case_sensitive = False
-
-        @classmethod
-        def parse_env_var(cls, field_name: str, raw_val: str):
-            if field_name in ['allowed_text_formats', 'allowed_video_formats', 'allowed_audio_formats',
-                             'allowed_image_formats', 'allowed_depth_formats',
-                             'allowed_thermal_formats', 'allowed_imu_formats', 'cors_origins']:
-                return [x.strip() for x in raw_val.split(',')]
-            return raw_val
+        extra = "ignore"  # tolerate stale env vars from older versions
 
     def create_directories(self):
-        """Create necessary directories if they don't exist."""
-        directories = [
-            self.cache_dir,
-            self.model_cache_dir,
-            self.chroma_persist_dir,
-            self.upload_dir,
-        ]
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
+        """Create necessary directories."""
+        for d in [self.chroma_persist_dir, self.upload_dir]:
+            os.makedirs(d, exist_ok=True)
 
 
-# Global settings instance
 settings = Settings()

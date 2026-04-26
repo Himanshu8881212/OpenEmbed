@@ -1,95 +1,25 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
+# Dependencies
 venv/
-env/
-ENV/
-.venv
+venv312/
+node_modules/
+__pycache__/
+*.pyc
+
+# Data
+chroma_db/
+uploads/
+logs/
+embed.db
+
+# Environment
+.env
+
+# Build
+frontend/build/
+
+# OS
+.DS_Store
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-.DS_Store
-.claude/
-*.code-workspace
-
-# Environment
-.env
-.env.local
-
-# Cache and Models
-cache_dir/
-model_cache/
-*.pth
-*.pt
-*.ckpt
-*.checkpoint
-.checkpoints/
-
-# Data and Uploads
-uploads/
-chroma_db/
-*.db
-demo_files/
-test_files/
-sample_data/
-
-# Logs
-*.log
-logs/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-test_results/
-*.test.log
-test_results.txt
-full_test_results.txt
-
-# Docker
-docker-compose.override.yml
-
-# Frontend
-frontend/node_modules/
-frontend/build/
-frontend/.env.local
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-frontend/package-lock.json
-package-lock.json
-
-# Temporary files
-*.tmp
-*.temp
-.tmp/
-.temp/
-
-# OS
-Thumbs.db
-.Spotlight-V100
-.Trashes

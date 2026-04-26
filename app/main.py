@@ -1,5 +1,5 @@
 """
-Main FastAPI application entry point.
+Main FastAPI application.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,115 +9,113 @@ from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 from app.core.config import settings
 from app.core.logger import app_logger as logger
+from app.core.rate_limiter import limiter
 from app.api.routes import router
-from app.services import imagebind_service, chroma_service, database_service
+from app.services import perception_service, chroma_service, db_service, reranker_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan handler.
-    Initialize services on startup and cleanup on shutdown.
-    """
-    # Startup
-    logger.info("Starting OpenEmbed application...")
-
-    # Create necessary directories
+    logger.info("Starting EMBEd...")
     settings.create_directories()
     os.makedirs("logs", exist_ok=True)
 
-    # Initialize SQLite database
-    logger.info("Initializing SQLite database...")
-    if not database_service.initialize():
-        logger.error("Failed to initialize database")
-    else:
-        logger.info("Database initialized successfully")
+    if not settings.admin_api_key:
+        logger.warning(
+            "ADMIN_API_KEY is not set — running in DEV MODE. "
+            "Admin endpoints (create/list/delete vaults) and any vault without its own "
+            "key are UNAUTHENTICATED. Set ADMIN_API_KEY in .env before deploying."
+        )
 
-    # Initialize ChromaDB
-    logger.info("Initializing ChromaDB...")
+    # ChromaDB
     if not chroma_service.initialize():
-        logger.error("Failed to initialize ChromaDB")
+        logger.error("ChromaDB init failed")
     else:
-        logger.info("ChromaDB initialized successfully")
+        logger.info("ChromaDB ready")
 
-    # Initialize embedding service
-    logger.info("Initializing embedding service (this may take a while on first run)...")
-    if not imagebind_service.initialize():
-        logger.error("Failed to initialize embedding service")
+    # SQLite metadata layer (vaults + files)
+    if not db_service.initialize():
+        logger.error("SQLite metadata init failed")
     else:
-        logger.info("Embedding service initialized successfully")
+        logger.info("SQLite metadata ready")
+        # Backfill chroma-only vaults (created before SQLite tracking existed)
+        try:
+            chroma_names = [c["name"] for c in chroma_service.list_collections()]
+            db_service.backfill_chroma_vaults(chroma_names)
+        except Exception as e:
+            logger.warning(f"Vault backfill skipped: {e}")
+
+    # Perception Encoder (loads PE-Core + PE-AV; first run downloads ~6GB)
+    if not perception_service.initialize():
+        logger.error("Perception Encoder init failed")
+    else:
+        logger.info("Perception Encoder ready")
+
+    # Cross-encoder reranker (BGE-reranker-v2-m3, ~568MB on first run)
+    if not reranker_service.initialize():
+        logger.warning("Reranker init failed — search will skip rerank step")
+    else:
+        logger.info("Reranker ready")
 
     logger.info("Application startup complete")
-
     yield
-
-    # Shutdown
-    logger.info("Shutting down application...")
+    logger.info("Shutting down...")
 
 
-# Create FastAPI app
 app = FastAPI(
-    title="OpenEmbed - Multi-Modal Embedding Application",
-    description="A professional application for generating embeddings from multiple modalities including text, image, video, audio, depth, thermal, and IMU data",
-    version="1.0.0",
-    lifespan=lifespan
+    title="EMBEd — Multi-Modal Embeddings",
+    description="Self-hosted multi-modal embeddings powered by Meta Perception Encoder",
+    version="3.0.0",
+    lifespan=lifespan,
 )
 
-# Configure CORS
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — explicit methods and headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
 
-# Include API routes
-app.include_router(router, prefix="/api", tags=["API"])
+app.include_router(router, prefix="/api")
 
-# Serve frontend static files (if they exist)
+# Ensure upload dir exists (files are served via auth-gated /api/files/...)
+Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+
+# Serve frontend
 frontend_build_path = Path(__file__).parent.parent / "frontend" / "build"
 if frontend_build_path.exists():
-    # Mount static files (JS, CSS, images, etc.)
     app.mount("/static", StaticFiles(directory=str(frontend_build_path / "static")), name="static")
 
-    # Serve index.html for all non-API routes (SPA routing)
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        """Serve frontend application for all non-API routes."""
-        # Don't serve frontend for API routes or docs
-        if full_path.startswith("api/") or full_path.startswith("docs") or full_path == "openapi.json":
+        if full_path.startswith("api/") or full_path == "docs" or full_path == "openapi.json":
             return {"error": "Not found"}
-
-        # Serve index.html for all other routes (React Router will handle routing)
-        index_path = frontend_build_path / "index.html"
-        if index_path.exists():
-            return FileResponse(str(index_path))
-
+        index = frontend_build_path / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
         return {"error": "Frontend not built"}
 else:
-    # Fallback if frontend is not built
     @app.get("/")
     async def root():
-        """API root endpoint."""
         return {
-            "message": "OpenEmbed API - Multi-Modal Embedding Application",
-            "version": "1.0.0",
+            "app": "EMBEd",
+            "version": "3.0.0",
             "docs": "/docs",
-            "api_prefix": "/api",
-            "modalities": ["text", "image", "video", "audio", "depth", "thermal", "imu"],
-            "note": "Frontend not available. Build frontend or access API at /api"
+            "api": "/api",
         }
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
-        log_level=settings.log_level.lower()
-    )
+    uvicorn.run("app.main:app", host=settings.host, port=settings.port, reload=settings.debug)

@@ -1,158 +1,77 @@
 """
-Pydantic models for request/response validation.
+Pydantic schemas for request/response validation.
 """
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from typing import Optional, Dict, Any, Tuple
+from pydantic import BaseModel, Field
 from enum import Enum
-from datetime import datetime
+import os
 
 
 class ModalityType(str, Enum):
-    """Supported modality types."""
+    """Supported modalities for Gemini Embedding 2."""
     TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
-    DEPTH = "depth"
-    THERMAL = "thermal"
-    IMU = "imu"
+    DOCUMENT = "document"
 
 
-# Supported file formats for each modality
-MODALITY_FILE_FORMATS = {
-    "text": [".txt", ".md", ".json", ".csv"],
-    "image": [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"],
-    "video": [".mp4", ".avi", ".mov", ".mkv", ".webm"],
-    "audio": [".wav", ".mp3", ".flac", ".m4a", ".ogg"],
-    "depth": [".png", ".jpg", ".jpeg", ".tiff"],
-    "thermal": [".png", ".jpg", ".jpeg", ".tiff"],
-    "imu": [".csv", ".json", ".txt"]
+# Supported MIME types for the multimodal pipeline
+MIME_TYPES = {
+    # Text
+    ".txt": "text/plain",
+    ".md": "text/plain",
+    # Image
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    # Video
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    # Audio
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    # Document
+    ".pdf": "application/pdf",
+}
+
+# Map extensions to modalities
+EXTENSION_TO_MODALITY = {
+    ".txt": ModalityType.TEXT, ".md": ModalityType.TEXT,
+    ".jpg": ModalityType.IMAGE, ".jpeg": ModalityType.IMAGE,
+    ".png": ModalityType.IMAGE, ".gif": ModalityType.IMAGE,
+    ".webp": ModalityType.IMAGE,
+    ".mp4": ModalityType.VIDEO, ".mov": ModalityType.VIDEO,
+    ".webm": ModalityType.VIDEO, ".mkv": ModalityType.VIDEO,
+    ".mp3": ModalityType.AUDIO, ".wav": ModalityType.AUDIO,
+    ".flac": ModalityType.AUDIO, ".m4a": ModalityType.AUDIO,
+    ".ogg": ModalityType.AUDIO, ".oga": ModalityType.AUDIO,
+    ".pdf": ModalityType.DOCUMENT,
 }
 
 
-class VectorStoreOperation(str, Enum):
-    """Vector store operation types."""
-    CREATE = "create"
-    USE_EXISTING = "use_existing"
+def detect_modality(filename: str) -> Tuple[Optional[ModalityType], Optional[str]]:
+    """Detect modality and MIME type from filename extension."""
+    ext = os.path.splitext(filename)[1].lower()
+    return EXTENSION_TO_MODALITY.get(ext), MIME_TYPES.get(ext)
 
 
 class VectorStoreCreate(BaseModel):
-    """Request model for creating a new vector store."""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-
-    @validator('name')
-    def validate_name(cls, v):
-        """Ensure vector store name is alphanumeric with underscores."""
-        if not v.replace('_', '').replace('-', '').isalnum():
-            raise ValueError('Name must contain only alphanumeric characters, hyphens, and underscores')
-        return v
-
-
-class VectorStoreInfo(BaseModel):
-    """Response model for vector store information."""
-    name: str
-    description: Optional[str]
-    count: int
-    modality: Optional[str] = None
-    created_at: Optional[datetime]
-    metadata: Optional[Dict[str, Any]]
-    size_bytes: Optional[int] = 0
-
-
-class VectorStoreList(BaseModel):
-    """Response model for listing vector stores."""
-    stores: List[VectorStoreInfo]
-    total: int
-
-
-class EmbeddingRequest(BaseModel):
-    """Request model for generating embeddings."""
-    vector_store_name: str = Field(..., min_length=1)
-    operation: VectorStoreOperation
-    modality: ModalityType
-    file_id: str = Field(..., description="Temporary file identifier from upload")
-    text_content: Optional[str] = Field(None, description="Text content for text modality")
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-
-
-class EmbeddingResponse(BaseModel):
-    """Response model for embedding generation."""
-    success: bool
-    message: str
-    embedding_id: Optional[str] = None
-    vector_store_name: str
-    modality: ModalityType
-    embedding_preview: Optional[List[float]] = Field(None, description="First 10 values of embedding for verification")
-    embedding_shape: Optional[int] = Field(None, description="Dimension of the embedding vector")
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class FileUploadResponse(BaseModel):
-    """Response model for file upload."""
-    success: bool
-    file_id: str
-    filename: str
-    modality: ModalityType
-    size: int
-    message: str
-
-
-class SearchRequest(BaseModel):
-    """Request model for similarity search."""
-    vector_store_name: str
-    query_modality: ModalityType
-    query_file_id: Optional[str] = None
-    query_text: Optional[str] = None
-    n_results: int = Field(default=10, ge=1, le=100)
-    include_metadata: bool = Field(default=True)
-
-    @validator('include_metadata', always=True)
-    def validate_query(cls, v, values):
-        """Ensure either file_id or text is provided."""
-        if values.get('query_modality') == ModalityType.TEXT:
-            if not values.get('query_text'):
-                raise ValueError('query_text is required for text modality')
-        else:
-            if not values.get('query_file_id'):
-                raise ValueError('query_file_id is required for non-text modalities')
-        return v
 
 
 class SearchResult(BaseModel):
-    """Single search result."""
     id: str
-    similarity: float  # Similarity score (0-1, higher is more similar)
-    distance: float  # Distance metric from ChromaDB
-    modality: str  # Modality of the result
-    metadata: Optional[Dict[str, Any]]
-    rank: int  # Rank in search results (1-based)
-    file_path: Optional[str] = None  # Path to download the file
-
-
-class SearchResponse(BaseModel):
-    """Response model for similarity search."""
-    success: bool
-    query_modality: str  # Modality of the query
-    vector_store: str  # Name of the vector store searched
-    n_results: int  # Number of results returned
-    results: List[SearchResult]
-    filter_modality: Optional[str] = None  # Optional modality filter applied
-
-
-class HealthResponse(BaseModel):
-    """Health check response."""
-    status: str
-    version: str
-    models_loaded: bool
-    vector_store_connected: bool
-    timestamp: datetime
-
-
-class ErrorResponse(BaseModel):
-    """Error response model."""
-    success: bool = False
-    error: str
-    detail: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    similarity: float
+    distance: float
+    metadata: Dict[str, Any] = {}
+    document: str = ""
