@@ -87,6 +87,12 @@ async def lifespan(app: FastAPI):
         perception_service.shutdown()
     except Exception as e:
         logger.warning(f"perception shutdown failed: {e}")
+    # Stop the MiniCPM llama-server subprocess if we launched one.
+    try:
+        from app.services import minicpm_captioner
+        minicpm_captioner.shutdown()
+    except Exception as e:
+        logger.warning(f"minicpm captioner shutdown failed: {e}")
 
 
 app = FastAPI(

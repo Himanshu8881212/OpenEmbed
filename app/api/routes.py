@@ -555,6 +555,11 @@ async def _embed_non_chunkable(
         captions: List[Tuple[int, str]] = []
         seen: set = set()  # dedupe identical captions across frames
         for i, w in enumerate(windows):
+            # Hard cap: only caption windows whose start is within the first
+            # MAX_VIDEO_CAPTION_SEC seconds. Keeps indexing time bounded for
+            # long videos without losing PE-AV embedding coverage.
+            if w["start_sec"] >= MAX_VIDEO_CAPTION_SEC:
+                break
             kfs = w.get("keyframes_png") or ([w["keyframe_png"]] if w.get("keyframe_png") else [])
             for kf in kfs:
                 cap = await asyncio.to_thread(image_captioner.caption_image, kf)
@@ -606,6 +611,12 @@ async def _embed_non_chunkable(
 
 
 _MAX_BATCH_FILES = 50
+
+# Caption only the first N seconds of any video. PE-AV embeddings still cover
+# the full clip (cheap and fast); only the BLIP/MiniCPM caption path is
+# capped, since each captioner call is the most expensive step in indexing.
+# Tunable via env so an offline batch ingest can disable the cap.
+MAX_VIDEO_CAPTION_SEC = float(os.environ.get("MAX_VIDEO_CAPTION_SEC", "30"))
 
 
 @router.post("/embed/batch")

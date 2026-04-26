@@ -20,7 +20,7 @@ Design
 """
 from __future__ import annotations
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import os
 import tempfile
 import threading
@@ -31,6 +31,11 @@ _MODEL_NAME = os.environ.get("ASR_MODEL", "openai/whisper-base")
 # ASR_STRICT=1 keeps the old aggressive hallucination filter (English-leaning).
 # Default is relaxed so short transcripts and non-Latin scripts pass through.
 _STRICT = os.environ.get("ASR_STRICT", "").lower() in ("1", "true", "yes")
+# Cap ASR input to first N seconds. Whisper on long files dominates indexing
+# latency (a 5-min audio took >5 min to transcribe). 0 = no cap. Default 30s
+# matches typical "first impression" content; PE-AV acoustic windowing still
+# covers the full clip.
+_MAX_SEC = float(os.environ.get("MAX_ASR_SEC", "30"))
 
 _pipeline = None
 _load_lock = threading.Lock()
@@ -134,8 +139,39 @@ def _looks_like_speech(text: str) -> bool:
     return True
 
 
+def _trim_with_ffmpeg(src_path: str, max_sec: float) -> Optional[str]:
+    """Trim `src_path` to its first `max_sec` seconds via ffmpeg.
+
+    Returns the path to the trimmed file (caller cleans up), or None if
+    ffmpeg isn't available — caller falls back to the original.
+    """
+    import shutil as _sh
+    import subprocess as _sp
+    if not _sh.which("ffmpeg"):
+        return None
+    out_fd, out_path = tempfile.mkstemp(suffix=os.path.splitext(src_path)[1])
+    os.close(out_fd)
+    try:
+        _sp.run(
+            ["ffmpeg", "-y", "-i", src_path, "-t", f"{max_sec}",
+             "-c", "copy", out_path],
+            check=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+        )
+        return out_path
+    except _sp.CalledProcessError:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        return None
+
+
 def transcribe_audio(audio_bytes: bytes, ext: str = ".wav") -> List[Dict[str, Any]]:
     """Transcribe speech audio into time-aligned segments.
+
+    Capped to the first MAX_ASR_SEC seconds (default 30) — Whisper on long
+    audio is the indexing-throughput bottleneck and most useful spoken
+    content lands in the first ~30 s anyway.
 
     Returns
     -------
@@ -150,16 +186,24 @@ def transcribe_audio(audio_bytes: bytes, ext: str = ".wav") -> List[Dict[str, An
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
         f.write(audio_bytes)
         path = f.name
+
+    trimmed_path: Optional[str] = None
+    if _MAX_SEC > 0:
+        trimmed_path = _trim_with_ffmpeg(path, _MAX_SEC)
+    transcribe_path = trimmed_path or path
+
     try:
-        result = p(path)
+        result = p(transcribe_path)
     except Exception as e:
         logger.warning(f"Whisper transcription failed: {e}")
         return []
     finally:
-        try:
-            os.unlink(path)
-        except Exception:
-            pass
+        for p_ in (path, trimmed_path):
+            if p_:
+                try:
+                    os.unlink(p_)
+                except Exception:
+                    pass
 
     out: List[Dict[str, Any]] = []
     for c in (result.get("chunks") or []):
