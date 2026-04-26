@@ -8,7 +8,7 @@ import os
 
 
 class ModalityType(str, Enum):
-    """Supported modalities for Gemini Embedding 2."""
+    """Supported modalities for the Perception Encoder pipeline."""
     TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"

@@ -184,7 +184,7 @@ def extract_pdf_text(file_bytes: bytes) -> List[Dict]:
 def chunk_pdf(file_bytes: bytes, chunk_size: int = None) -> List[Dict]:
     """
     Extract PDF text, then chunk while tracking page numbers.
-    Returns empty list if extraction fails (caller falls back to Gemini multimodal).
+    Returns empty list if extraction fails (caller treats the PDF as opaque).
     """
     chunk_size = chunk_size or settings.chunk_size
     pages = extract_pdf_text(file_bytes)
