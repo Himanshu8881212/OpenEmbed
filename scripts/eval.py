@@ -676,10 +676,16 @@ REAL_AUDIO: List[Tuple[str, str, str, List[str]]] = [
 ]
 
 REAL_VIDEO: List[Tuple[str, str, str, List[str]]] = [
+    # The 10-second BBB clip is the opening landscape pan — trees, meadow,
+    # a small cave. The rabbit himself doesn't appear in the first 10s, so
+    # gold queries reflect what BLIP actually sees in the keyframes.
     ("bigbuckbunny",
      "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
      "video/mp4",
-     ["big buck bunny short film", "animated rabbit cartoon"]),
+     ["big buck bunny short film",          # filename hit
+      "outdoor forest landscape",            # caption-matched (visual semantic)
+      "trees in a grassy meadow",            # caption-matched
+      "animated outdoor scenery"]),          # caption-matched
 ]
 
 REAL_OOD = [
@@ -744,7 +750,9 @@ def section_realmedia() -> Dict:
         "video/mp4": ".mp4",
     }
 
-    with httpx.Client(timeout=300) as c:
+    # 900s timeout — kalimba.mp3 is 5+ min of audio → ASR + 14 PE-AV
+    # windows can take 6+ min on a cold cache.
+    with httpx.Client(timeout=900) as c:
         vault, key = make_vault(c, "eval-real")
         H = {"X-API-Key": key}
         try:

@@ -569,6 +569,8 @@ def encode_video_windows(
     window_sec: float = 10.0,
     overlap_sec: float = 2.0,
     frames_per_window: int = 8,
+    with_keyframes: bool = False,
+    keyframes_per_window: int = 4,
 ) -> List[Dict[str, Any]]:
     """Sliding-window video embeddings.
 
@@ -576,7 +578,16 @@ def encode_video_windows(
     overlap → stride 8s) and embeds each window's uniformly-sampled frames
     into PE-AV video space. Short clips (≤window_sec) yield a single window.
 
-    Returns: [{"start_sec": float, "end_sec": float, "embedding": [..]}, ...]
+    When `with_keyframes=True`, each output dict also includes
+    `keyframes_png` — a list of `keyframes_per_window` PNG-encoded stills
+    sampled evenly across the window. Multiple frames matter because a
+    single middle frame often misses transient subjects (a 10s shot of a
+    landscape with a rabbit briefly visible would caption as "landscape"
+    if you only look at the centre). The caller runs BLIP on each frame
+    and indexes the captions as text-for-video chunks.
+
+    Returns: [{"start_sec": float, "end_sec": float, "embedding": [..],
+               "keyframes_png": [bytes, ...] (optional)}, ...]
     """
     import av
 
@@ -630,11 +641,24 @@ def encode_video_windows(
             idxs = [idxs[i] for i in pick]
         clip = np.stack([frames[i] for i in idxs])
         emb = _encode_video_frames(clip)
-        out.append({
+        item: Dict[str, Any] = {
             "start_sec": round(s_sec, 2),
             "end_sec": round(e_sec, 2),
             "embedding": emb,
-        })
+        }
+        if with_keyframes:
+            # Sample N evenly-spaced frames from this window. More than one
+            # is essential — a transient subject (a character on screen for
+            # 2 of 10 seconds) won't show up in just the middle frame.
+            n = max(1, min(keyframes_per_window, len(idxs)))
+            pick = np.linspace(0, len(idxs) - 1, n).astype(int)
+            kfs: List[bytes] = []
+            for k in pick:
+                kbuf = io.BytesIO()
+                Image.fromarray(frames[idxs[int(k)]]).save(kbuf, format="PNG")
+                kfs.append(kbuf.getvalue())
+            item["keyframes_png"] = kfs
+        out.append(item)
     return out
 
 

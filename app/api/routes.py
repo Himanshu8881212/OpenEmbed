@@ -3,7 +3,7 @@ API routes — multimodal indexing and fan-out retrieval.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
 from fastapi.responses import FileResponse
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from datetime import datetime
 import asyncio
 import uuid
@@ -525,8 +525,14 @@ async def _embed_non_chunkable(
     elif modality == ModalityType.VIDEO:
         # Sliding-window video — same shape as audio: each chunk is a bounded
         # time-range. Long clips become individually retrievable segments.
+        # Pull keyframes alongside so we can caption each window with BLIP
+        # and index the captions as text-for-video chunks. The PE-AV video
+        # embedding alone often misses paraphrased text queries; the
+        # caption gives the cross-encoder real prose to score and BM25 a
+        # token-level hit.
         windows = await asyncio.to_thread(
-            perception_service.encode_video_windows, file_bytes, ext or ".mp4"
+            perception_service.encode_video_windows, file_bytes, ext or ".mp4",
+            with_keyframes=True,
         )
         for i, w in enumerate(windows):
             wmeta = {
@@ -535,10 +541,58 @@ async def _embed_non_chunkable(
                 "total_chunks": len(windows),
                 "start_sec": w["start_sec"],
                 "end_sec": w["end_sec"],
+                "video_track": "visual",
             }
             cid = f"{doc_id}_chunk_{i}"
             chroma_service.add_embedding(vault, "video", cid, w["embedding"], wmeta)
-        n_chunks = len(windows)
+
+        # Caption multiple keyframes per window (default 3). Single-frame
+        # captions miss transient subjects — e.g. a 10s clip with a
+        # character on-screen for only 2 seconds; the middle frame would
+        # caption as "background scenery" and the character would never be
+        # searchable. Sampling 3 frames per window catches it.
+        # Cost: BLIP ~200 ms per frame on MPS — 3 frames × N windows.
+        captions: List[Tuple[int, str]] = []
+        seen: set = set()  # dedupe identical captions across frames
+        for i, w in enumerate(windows):
+            kfs = w.get("keyframes_png") or ([w["keyframe_png"]] if w.get("keyframe_png") else [])
+            for kf in kfs:
+                cap = await asyncio.to_thread(image_captioner.caption_image, kf)
+                if not cap:
+                    continue
+                key = (i, cap.lower().strip())
+                if key in seen:
+                    continue
+                seen.add(key)
+                captions.append((i, cap))
+
+        n_caption = 0
+        if captions:
+            caption_texts = [c for _, c in captions]
+            embs = await asyncio.to_thread(
+                perception_service.encode_text_for_video_batch, caption_texts
+            )
+            for j, ((i, caption), emb) in enumerate(zip(captions, embs)):
+                cmeta = {
+                    **base_meta,
+                    "video_track": "caption",
+                    "chunk_index": len(windows) + j,
+                    "total_chunks_caption": len(captions),
+                    "start_sec": windows[i]["start_sec"],
+                    "end_sec": windows[i]["end_sec"],
+                    "caption": caption,
+                    "document_text": caption,
+                }
+                cid = f"{doc_id}_caption_{j}"
+                chroma_service.add_chunks(vault, "video", [{
+                    "id": cid,
+                    "embedding": emb,
+                    "metadata": {**cmeta, "space": "video"},
+                    "text": caption,
+                }])
+            n_caption = len(captions)
+            logger.info(f"video captioned: {filename!r} → {n_caption} keyframe captions")
+        n_chunks = len(windows) + n_caption
     elif modality == ModalityType.TEXT:
         # Text fallback (e.g. empty chunker result); index once
         text_content = file_bytes.decode("utf-8", errors="replace")
