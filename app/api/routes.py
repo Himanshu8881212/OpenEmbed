@@ -698,6 +698,7 @@ async def search(
     n_results: int = Form(10, ge=1, le=100),
     min_similarity: float = Form(0.0, ge=0.0, le=1.0),
     min_rerank_score: Optional[float] = Form(None),
+    unique_files: bool = Form(True),
 ):
     """Search a vault by text or by file (modality auto-detected).
 
@@ -705,6 +706,10 @@ async def search(
     below the threshold. Cleaner cutoff than `min_similarity`: ≥0 is
     confidently on-topic, -3 is a good "only relevant" floor, ≤-8 is junk.
     Only applies to text queries (file queries skip the reranker).
+
+    `unique_files` (default true) collapses multi-chunk source files
+    (image tiles, multi-page PDFs, audio windows) to one result per file,
+    keeping the highest-scoring chunk. Pass `false` for chunk-level results.
     """
     validate_request_auth(request, vector_store)
 
@@ -748,6 +753,13 @@ async def search(
                 raise HTTPException(status_code=400, detail=f"Unsupported query modality '{modality.value}'")
 
             query_info = {"type": modality.value, "filename": file.filename}
+
+        # Collapse multi-chunk source files (image tiles, PDF chunks, audio
+        # windows) to one row per file when the caller wants file-level UX.
+        # Done after retrieval so quadrant-level matching still scores against
+        # the parent file — we just don't render every quadrant separately.
+        if unique_files:
+            results = chroma_service.dedupe_by_doc_id(results)[:n_results]
 
         return {
             "success": True,

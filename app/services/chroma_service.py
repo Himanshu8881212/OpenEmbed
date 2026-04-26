@@ -386,6 +386,37 @@ def _dedupe_by_id(items: List[Dict]) -> List[Dict]:
     return list(seen.values())
 
 
+def _hit_score(hit: Dict) -> float:
+    """Best available score for a hit. Reranker logit > cosine > rrf."""
+    if "rerank_score" in hit:
+        return float(hit["rerank_score"])
+    if "similarity" in hit:
+        return float(hit["similarity"])
+    return float(hit.get("rrf_score", 0.0))
+
+
+def dedupe_by_doc_id(items: List[Dict]) -> List[Dict]:
+    """Collapse multi-chunk source files (image tiles, multi-page PDFs,
+    audio windows) to one entry per doc_id, keeping the highest-scoring
+    chunk. Output is sorted highest score first.
+
+    Hits without a doc_id are passed through unchanged."""
+    best: Dict[str, Dict] = {}
+    passthrough: List[Dict] = []
+    for h in items:
+        meta = h.get("metadata") or {}
+        doc_id = meta.get("doc_id")
+        if not doc_id:
+            passthrough.append(h)
+            continue
+        existing = best.get(doc_id)
+        if existing is None or _hit_score(h) > _hit_score(existing):
+            best[doc_id] = h
+    out = list(best.values()) + passthrough
+    out.sort(key=_hit_score, reverse=True)
+    return out
+
+
 # ── MMR diversity & full-vault listing for BM25 ─────────────────
 
 # Page size for vault-wide scans. ChromaDB's `get()` returns the entire
