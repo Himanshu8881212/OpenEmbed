@@ -160,17 +160,33 @@ export const embedBatch = async (store: string, files: File[]): Promise<any> => 
 
 // ── Search (per-vault key) ──────────────────────────────
 
-export const searchText = async (store: string, query: string, nResults: number = 20, minSimilarity: number = 0.0): Promise<any> => {
+// Cross-encoder logit floor: ≥0 confidently on-topic, ≈-3 borderline,
+// ≤-8 junk. -3 drops off-topic / nonsense matches without losing legitimate
+// semantic hits. Pass `null` to disable filtering.
+export const DEFAULT_MIN_RERANK_SCORE = -3;
+
+export const searchText = async (
+  store: string,
+  query: string,
+  nResults: number = 20,
+  minSimilarity: number = 0.0,
+  minRerankScore: number | null = DEFAULT_MIN_RERANK_SCORE,
+): Promise<any> => {
   const form = new FormData();
   form.append('vector_store', store);
   form.append('query', query);
   form.append('n_results', nResults.toString());
   form.append('min_similarity', minSimilarity.toString());
+  if (minRerankScore !== null) {
+    form.append('min_rerank_score', minRerankScore.toString());
+  }
   const res = await api.post('/api/search', form, { headers: vaultHeaders(store) });
   return res.data;
 };
 
 export const searchFile = async (store: string, file: File, nResults: number = 20, minSimilarity: number = 0.0): Promise<any> => {
+  // File queries skip the reranker pipeline (image/audio/video go straight
+  // to per-space cosine), so min_rerank_score doesn't apply here.
   const form = new FormData();
   form.append('vector_store', store);
   form.append('file', file);
