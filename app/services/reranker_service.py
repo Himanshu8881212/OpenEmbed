@@ -2,6 +2,7 @@
 Cross-encoder reranker (BGE-reranker-v2-m3) — sharper top-K than bi-encoders.
 Lazy-loaded on first use, runs on M3 MPS in fp16.
 """
+import math
 import os
 import threading
 from typing import List, Optional, Tuple
@@ -9,6 +10,19 @@ from typing import List, Optional, Tuple
 import torch
 
 from app.core.logger import app_logger as logger
+
+
+# fp16 reranker can produce NaN/Inf on degenerate inputs (zero-length doc,
+# all-padding tokens). JSON serialisation then crashes with
+# "Out of range float values are not JSON compliant". Clamp to a very
+# negative score so callers' min_rerank_score filters drop the row.
+_BAD_SCORE_FLOOR = -100.0
+
+
+def _sanitize(score: float) -> float:
+    if math.isnan(score) or math.isinf(score):
+        return _BAD_SCORE_FLOOR
+    return score
 
 _model = None
 _tokenizer = None
@@ -114,7 +128,7 @@ def score(queries: List[str], documents_per_query: List[List[str]], batch_size: 
             ).to(device)
             with torch.inference_mode():
                 logits = model(**inputs).logits.view(-1).float().cpu().tolist()
-            scores.extend(logits)
+            scores.extend(_sanitize(s) for s in logits)
         out.append(scores)
     return out
 

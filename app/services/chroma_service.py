@@ -340,9 +340,14 @@ def _query_one(col, embedding: List[float], n_results: int, min_similarity: floa
     items: List[Dict] = []
     if not results or not results.get("ids") or not results["ids"][0]:
         return items
+    import math as _math
     embeds_row = (results.get("embeddings") or [None])[0] if include_embeddings else None
     for i, doc_id in enumerate(results["ids"][0]):
         distance = results["distances"][0][i] if results.get("distances") else 0
+        # Chroma can return NaN/inf for degenerate vectors (rare); guard the
+        # arithmetic and JSON encoder both.
+        if distance is None or _math.isnan(distance) or _math.isinf(distance):
+            distance = 2.0  # treat as max-distance → similarity 0
         similarity = max(0.0, 1.0 - distance / 2.0)
         if similarity >= min_similarity:
             item = {

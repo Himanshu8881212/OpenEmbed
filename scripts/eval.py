@@ -631,6 +631,224 @@ def section_scale() -> Dict:
             "hit_rate": hits / max(1, n)}
 
 
+# ── realmedia section: real downloaded photos/audio/video ────────
+#
+# Synthetic test fixtures cap visual-semantic scores. This section pulls
+# real, public-domain media from stable URLs (Wikimedia + a small set of
+# CDN-hosted samples), caches to ~/.cache/embed-eval/, and runs the same
+# cross-modal queries against the live system. If a URL fails the item
+# is skipped (with a note) — the rest still scores.
+
+CACHE_DIR = Path.home() / ".cache" / "embed-eval"
+DOWNLOAD_UA = "EMBEd-eval-bot/1.0 (https://github.com/Himanshu8881212/OpenEmbed)"
+
+# (id, url, mime, gold queries that should hit, ood queries that shouldn't)
+REAL_IMAGES: List[Tuple[str, str, str, List[str]]] = [
+    ("eiffel",
+     "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/800px-Tour_Eiffel_Wikimedia_Commons.jpg",
+     "image/jpeg",
+     ["Eiffel Tower in Paris", "iron lattice tower", "Parisian landmark at night"]),
+    ("everest",
+     "https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Everest%2C_Himalayas.jpg/960px-Everest%2C_Himalayas.jpg",
+     "image/jpeg",
+     ["snowy mountain peak", "Himalayan summit", "highest mountain"]),
+    ("octopus",
+     "https://upload.wikimedia.org/wikipedia/commons/thumb/3/32/Octopus_vulgaris_Merculiano.jpg/960px-Octopus_vulgaris_Merculiano.jpg",
+     "image/jpeg",
+     ["octopus illustration", "cephalopod", "sea creature with tentacles"]),
+    ("cat",
+     "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/800px-Cat03.jpg",
+     "image/jpeg",
+     ["domestic cat", "tabby cat", "feline pet"]),
+    ("forest",
+     "https://upload.wikimedia.org/wikipedia/commons/thumb/3/34/Spruce_forest_at_Holma.jpg/960px-Spruce_forest_at_Holma.jpg",
+     "image/jpeg",
+     ["dense conifer forest", "spruce trees in woodland", "evergreen woods"]),
+]
+
+REAL_AUDIO: List[Tuple[str, str, str, List[str]]] = [
+    ("piano",   "https://www.kozco.com/tech/piano2.wav",
+     "audio/wav",
+     ["piano music", "classical instrument recording"]),
+    ("kalimba", "https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3",
+     "audio/mpeg",
+     ["kalimba thumb piano", "soft mellow instrumental"]),
+]
+
+REAL_VIDEO: List[Tuple[str, str, str, List[str]]] = [
+    ("bigbuckbunny",
+     "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+     "video/mp4",
+     ["big buck bunny short film", "animated rabbit cartoon"]),
+]
+
+REAL_OOD = [
+    "stock market analysis Q4 2025",
+    "asdfgh qwerty zzzz",
+]
+
+
+def _download(url: str, dest: Path) -> Optional[bytes]:
+    """Cache-aware download. Returns bytes or None on failure."""
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest.read_bytes()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = httpx.get(url, headers={"User-Agent": DOWNLOAD_UA},
+                      follow_redirects=True, timeout=60)
+    except httpx.HTTPError as e:
+        print(f"  {R}download failed{RESET} {url[:60]}…  {e}")
+        return None
+    if r.status_code != 200:
+        print(f"  {R}download {r.status_code}{RESET} {url[:60]}…")
+        return None
+    dest.write_bytes(r.content)
+    return r.content
+
+
+def _embed_real(c: httpx.Client, vault: str, H: dict,
+                items: List[Tuple[str, str, str, List[str]]],
+                ext_for_mime: dict) -> List[Tuple[str, str, List[str]]]:
+    """Download + embed each item. Returns list of (id, filename, queries) for items
+    that successfully embedded."""
+    embedded = []
+    for item_id, url, mime, queries in items:
+        ext = ext_for_mime.get(mime, "")
+        cached = CACHE_DIR / f"{item_id}{ext}"
+        data = _download(url, cached)
+        if data is None:
+            print(f"  {Y}skip {item_id} (download failed){RESET}")
+            continue
+        fname = f"{item_id}{ext}"
+        r = c.post(f"{BASE}/api/embed", headers=H,
+                   files={"file": (fname, data, mime)},
+                   data={"vector_store": vault})
+        if r.status_code != 200:
+            print(f"  {R}embed failed for {item_id}: {r.status_code} {r.text[:200]}{RESET}")
+            continue
+        chunks = r.json().get("chunks", "?")
+        size_kb = len(data) // 1024
+        print(f"  {DIM}{item_id:<14} {size_kb:>6} KB → {chunks} chunks{RESET}")
+        embedded.append((item_id, fname, queries))
+    return embedded
+
+
+def section_realmedia() -> Dict:
+    bar("real-world media: downloaded photos, audio, video")
+    print(f"{DIM}cache: {CACHE_DIR}{RESET}")
+    ext_for_mime = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "audio/wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "video/mp4": ".mp4",
+    }
+
+    with httpx.Client(timeout=300) as c:
+        vault, key = make_vault(c, "eval-real")
+        H = {"X-API-Key": key}
+        try:
+            print(f"\n{DIM}── images ──{RESET}")
+            img_items = _embed_real(c, vault, H, REAL_IMAGES, ext_for_mime)
+            print(f"\n{DIM}── audio ──{RESET}")
+            aud_items = _embed_real(c, vault, H, REAL_AUDIO, ext_for_mime)
+            print(f"\n{DIM}── video ──{RESET}")
+            vid_items = _embed_real(c, vault, H, REAL_VIDEO, ext_for_mime)
+            time.sleep(0.5)
+
+            # Build full query list with gold ids
+            queries: List[Tuple[str, str, Set[str], str]] = []
+            for item_id, _fn, qs in img_items + aud_items + vid_items:
+                for q in qs:
+                    cat = "text→image" if (item_id, _fn, qs) in img_items else \
+                          "text→audio" if (item_id, _fn, qs) in aud_items else \
+                          "text→video"
+                    queries.append((q, item_id, {item_id}, cat))
+            for q in REAL_OOD:
+                queries.append((q, "ood", set(), "out-of-domain"))
+
+            # Run text → media queries
+            print(f"\n{DIM}{'category':<14}{'query':<46}{'rank':<6}status{RESET}")
+            print("─" * 100)
+
+            def _fileid(filename: str) -> str:
+                # filenames are stored as "<id><ext>"; strip extension
+                stem = filename
+                for ext in ext_for_mime.values():
+                    if stem.endswith(ext):
+                        return stem[:-len(ext)]
+                return stem
+
+            in_d_ranks: List[Optional[int]] = []
+            ood_ok = []
+            for q, gold_id, gold_set, cat in queries:
+                r = c.post(f"{BASE}/api/search", headers=H,
+                           data={"vector_store": vault, "query": q,
+                                 "n_results": str(TOP_K),
+                                 "min_rerank_score": str(RERANK_FLOOR)})
+                hits_payload = r.json().get("results", [])
+                hits = []
+                for h in hits_payload[:TOP_K]:
+                    fn = (h.get("metadata") or {}).get("filename", "")
+                    hits.append(_fileid(fn))
+                if not gold_set:
+                    correct = len(hits_payload) == 0
+                    ood_ok.append(correct)
+                    status = f"{G}REJECTED{RESET}" if correct else f"{R}LEAKED → {hits[:2]}{RESET}"
+                    rank = "—"
+                else:
+                    rank = next((i + 1 for i, h in enumerate(hits) if h in gold_set), None)
+                    in_d_ranks.append(rank)
+                    status = f"{G}hit @ {rank}{RESET}" if rank else f"{R}MISS — got {hits[:2] or 'nothing'}{RESET}"
+                    rank = str(rank) if rank else "—"
+                qp = q if len(q) <= 44 else q[:41] + "…"
+                print(f"{cat:<14}{qp:<46}{rank:<6}{status}")
+
+            # Media → media (file query): re-upload each downloaded file as a search query
+            print(f"\n{DIM}{B}media → media (file query) — same file should rank #1{RESET}")
+            print(f"{DIM}{'modality':<14}{'query file':<22}{'rank':<6}status{RESET}")
+            print("─" * 70)
+            file_ranks: List[Optional[int]] = []
+            for items, modality in [(img_items, "image"), (aud_items, "audio"), (vid_items, "video")]:
+                for item_id, fname, _qs in items:
+                    cached = CACHE_DIR / fname
+                    data = cached.read_bytes()
+                    mime = next((m for m in ext_for_mime
+                                 if ext_for_mime[m] == cached.suffix), "application/octet-stream")
+                    r = c.post(f"{BASE}/api/search", headers=H,
+                               files={"file": (f"q-{fname}", data, mime)},
+                               data={"vector_store": vault, "n_results": str(TOP_K)})
+                    hits_payload = r.json().get("results", [])
+                    hits = [_fileid((h.get("metadata") or {}).get("filename", ""))
+                            for h in hits_payload[:TOP_K]]
+                    rank = next((i + 1 for i, h in enumerate(hits) if h == item_id), None)
+                    file_ranks.append(rank)
+                    status = f"{G}hit @ {rank}{RESET}" if rank else f"{R}MISS{RESET}"
+                    print(f"{modality:<14}{item_id:<22}{str(rank) if rank else '—':<6}{status}")
+        finally:
+            kill_vault(c, vault)
+
+    in_d_total = len(in_d_ranks)
+    in_d_hits = sum(1 for r in in_d_ranks if r)
+    hit_rate = in_d_hits / max(1, in_d_total)
+    mrr = sum((1 / r) if r else 0 for r in in_d_ranks) / max(1, in_d_total)
+    file_total = len(file_ranks)
+    file_hits = sum(1 for r in file_ranks if r)
+    file_rate = file_hits / max(1, file_total)
+    rej = sum(1 for r in ood_ok if r) / max(1, len(ood_ok))
+
+    print(f"\n{B}realmedia summary{RESET}")
+    print(f"  text → media Hit@{TOP_K}:  {hit_rate:.1%}  ({in_d_hits}/{in_d_total})")
+    print(f"  text → media MRR:      {mrr:.3f}")
+    print(f"  media → media Hit@{TOP_K}: {file_rate:.1%}  ({file_hits}/{file_total})")
+    print(f"  out-of-domain rejected: {rej:.1%}")
+
+    return {"section": "realmedia",
+            "text_hit": hit_rate, "text_mrr": mrr,
+            "file_hit": file_rate, "ood_reject": rej,
+            "in_domain": in_d_total, "ood": len(ood_ok)}
+
+
 # ── orchestration ────────────────────────────────────────────────
 
 def main() -> int:
@@ -640,7 +858,7 @@ def main() -> int:
     args = parser.parse_args()
 
     requested = [s.strip() for s in args.section.split(",")] if args.section != "all" else \
-                ["text", "image", "pdf", "audio", "scale"]
+                ["text", "realmedia", "pdf", "audio", "scale"]
 
     print(f"{B}EMBEd retrieval evaluation{RESET}")
     print(f"{DIM}base: {BASE}  top_k={TOP_K}  rerank_floor={RERANK_FLOOR}{RESET}")
@@ -659,7 +877,8 @@ def main() -> int:
     summaries: List[Dict] = []
     runners = {
         "text": section_text,
-        "image": section_image,
+        "image": section_image,            # synthetic; kept for diagnosis
+        "realmedia": section_realmedia,    # downloaded real photos / audio / video
         "pdf": section_pdf,
         "audio": section_audio,
         "scale": section_scale,
