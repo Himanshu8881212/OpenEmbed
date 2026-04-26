@@ -160,31 +160,58 @@ def chunk_markdown(text: str, chunk_size: int = None) -> List[Dict]:
 
 # ── PDF Text Extraction ──────────────────────────────────────────
 
+class PDFExtractionError(Exception):
+    """Raised when a PDF cannot be opened or read at all (corrupt/encrypted).
+
+    Distinct from "PDF opened fine but contains no extractable text" — that
+    case still returns []. Callers can catch this to mark a file as
+    failed-with-reason instead of silently indexing zero chunks.
+    """
+
+
 def extract_pdf_text(file_bytes: bytes) -> List[Dict]:
     """
-    Extract text from PDF using PyMuPDF (fitz).
-    Returns per-page text with page numbers.
+    Extract text from PDF using PyMuPDF (fitz). Returns per-page text with
+    page numbers. Empty list = readable PDF with no text (likely scanned).
+    Raises PDFExtractionError if the PDF can't be opened.
     """
     try:
         import fitz
+    except ImportError as e:
+        logger.error(f"PyMuPDF not installed: {e}")
+        raise PDFExtractionError("PyMuPDF (fitz) is not installed") from e
+
+    try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages = []
+    except Exception as e:
+        logger.warning(f"PDF could not be opened ({len(file_bytes)} bytes): {e}")
+        raise PDFExtractionError(f"PDF unreadable: {e}") from e
+
+    pages: List[Dict] = []
+    try:
         for page_num in range(len(doc)):
-            page = doc[page_num]
-            text = page.get_text().strip()
+            try:
+                text = doc[page_num].get_text().strip()
+            except Exception as e:
+                logger.warning(f"Skipping PDF page {page_num + 1}: {e}")
+                continue
             if text:
                 pages.append({"text": text, "page": page_num + 1})
+    finally:
         doc.close()
-        return pages
-    except Exception as e:
-        logger.warning(f"PDF text extraction failed: {e}")
-        return []
+
+    if not pages:
+        logger.info("PDF opened but yielded no extractable text (likely scanned/image-only)")
+    return pages
 
 
 def chunk_pdf(file_bytes: bytes, chunk_size: int = None) -> List[Dict]:
     """
     Extract PDF text, then chunk while tracking page numbers.
-    Returns empty list if extraction fails (caller treats the PDF as opaque).
+
+    Raises PDFExtractionError if the PDF can't be opened. Returns [] when
+    the PDF is openable but has no extractable text (e.g. scanned image-only
+    PDF) — caller should treat that as a non-text doc.
     """
     chunk_size = chunk_size or settings.chunk_size
     pages = extract_pdf_text(file_bytes)

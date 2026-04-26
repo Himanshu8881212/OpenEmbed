@@ -388,6 +388,27 @@ def _dedupe_by_id(items: List[Dict]) -> List[Dict]:
 
 # ── MMR diversity & full-vault listing for BM25 ─────────────────
 
+def list_referenced_doc_ids(vault: str) -> set:
+    """Return the set of doc_ids that have at least one chunk in any space.
+
+    Used by the orphan-upload sweeper to decide which files in
+    uploads/<vault>/ are still backed by the vector store.
+    """
+    referenced: set = set()
+    for col in _existing_subs(vault):
+        try:
+            data = col.get(include=["metadatas"])
+        except Exception:
+            continue
+        for meta in (data.get("metadatas") or []):
+            if not meta:
+                continue
+            doc_id = meta.get("doc_id")
+            if doc_id:
+                referenced.add(str(doc_id))
+    return referenced
+
+
 def list_all_chunks(vault: str) -> List[tuple]:
     """Return every chunk in a vault as (chunk_id, text, metadata), deduped by chunk id.
     Used by bm25_service to (re)build the lexical index."""

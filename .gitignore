@@ -10,6 +10,9 @@ chroma_db/
 uploads/
 logs/
 embed.db
+embed.db-wal
+embed.db-shm
+backups/
 
 # Environment
 .env

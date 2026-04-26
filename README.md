@@ -57,6 +57,30 @@ Auth is via the `X-API-Key` header. `/api/files/...` also accepts `?api_key=...`
 - **Dimensions**: 1024 (fixed, all modalities project to a shared space)
 - **Retrieval**: dense × 3 PE spaces + BM25 → RRF → cross-encoder rerank → MMR → top-K
 
+## Operations
+
+**Backups.** State lives in two places — `chroma_db/` (vectors) and `embed.db`
+(metadata). Snapshot both with:
+
+```bash
+./scripts/backup.sh                # → ./backups/embed-<timestamp>.tgz
+./scripts/backup.sh /mnt/snapshots # custom destination
+```
+
+Old snapshots in the destination dir are pruned after `BACKUP_RETENTION_DAYS`
+(default 30). Restore by stopping the server, replacing the two paths from the
+tarball, and restarting.
+
+**Orphan upload sweep.** Files left in `uploads/` after a crashed embed are
+swept on startup. Trigger manually with admin auth:
+
+```bash
+curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \
+     "http://localhost:8000/api/admin/orphans/<vault>?dry_run=true"
+```
+
+**Structured logs.** `LOG_FORMAT=json` emits JSON-per-line for log shippers.
+
 ## License
 
 MIT

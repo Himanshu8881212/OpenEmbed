@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logger import app_logger as logger
 from app.core.rate_limiter import limiter
-from app.api.routes import router
+from app.api.routes import router, sweep_all_vaults_orphans
 from app.services import perception_service, chroma_service, db_service, reranker_service
 
 
@@ -61,6 +61,18 @@ async def lifespan(app: FastAPI):
         logger.warning("Reranker init failed — search will skip rerank step")
     else:
         logger.info("Reranker ready")
+
+    # Orphan upload sweep — best-effort cleanup of uploads/ files whose chunks
+    # are no longer in Chroma (e.g. crashed mid-embed). Runs once at startup.
+    try:
+        sweep = sweep_all_vaults_orphans()
+        if sweep["total_orphans"]:
+            logger.info(
+                f"Startup orphan sweep: removed {sweep['total_orphans']} "
+                f"orphan file(s) across {sweep['vaults']} vault(s)"
+            )
+    except Exception as e:
+        logger.warning(f"Startup orphan sweep skipped: {e}")
 
     logger.info("Application startup complete")
     yield

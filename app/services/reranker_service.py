@@ -47,8 +47,17 @@ def _load():
 def initialize() -> bool:
     try:
         _load()
-        # Warmup
-        score(["warmup"], [["dummy chunk"]])
+        # Warmup with a realistic query/document pair so the first real
+        # request doesn't pay the kernel-compile cost. Includes both a
+        # short and a long document to prime padding shapes.
+        score(
+            ["What is the capital of France?"],
+            [[
+                "Paris is the capital and most populous city of France.",
+                "The Eiffel Tower stands 330 metres tall along the Seine in Paris, and was "
+                "completed in 1889 for the Exposition Universelle.",
+            ]],
+        )
         return True
     except Exception as e:
         logger.error(f"Reranker init failed: {e}")

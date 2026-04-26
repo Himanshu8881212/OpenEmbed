@@ -28,6 +28,9 @@ import threading
 from app.core.logger import app_logger as logger
 
 _MODEL_NAME = os.environ.get("ASR_MODEL", "openai/whisper-base")
+# ASR_STRICT=1 keeps the old aggressive hallucination filter (English-leaning).
+# Default is relaxed so short transcripts and non-Latin scripts pass through.
+_STRICT = os.environ.get("ASR_STRICT", "").lower() in ("1", "true", "yes")
 
 _pipeline = None
 _load_lock = threading.Lock()
@@ -84,35 +87,48 @@ def is_available() -> bool:
 def _looks_like_speech(text: str) -> bool:
     """Heuristic: does this transcript look like real speech, or Whisper babble?
 
-    Catches three common Whisper hallucination patterns on non-speech audio:
+    Targets Whisper's three common hallucination patterns on non-speech audio:
       1. Emoji / symbol walls   -> low letter ratio
       2. "Thank you." × N       -> one word dominates
       3. "♪♪♪♪♪♪"              -> low character diversity
+
+    Thresholds are deliberately permissive (short utterances, CJK / non-Latin
+    scripts pass): ASR_STRICT=1 reverts to the tighter English-leaning rules.
     """
     text = (text or "").strip()
-    if len(text) < 8:
+
+    min_len = 8 if _STRICT else 4
+    letter_ratio_min = 0.5 if _STRICT else 0.4
+    char_diversity_min = 6 if _STRICT else 4
+
+    if len(text) < min_len:
+        if text:
+            logger.debug(f"ASR drop (too short): {text!r}")
         return False
 
-    # 1. Letter ratio — real speech is mostly letters + spaces + light punctuation
+    # 1. Letter ratio — real speech is mostly letters + spaces + light punctuation.
+    #    str.isalpha() is unicode-aware (CJK, Cyrillic, Arabic all count as letters).
     letters = sum(1 for c in text if c.isalpha())
-    if letters / len(text) < 0.5:
+    if letters / len(text) < letter_ratio_min:
+        logger.debug(f"ASR drop (low letter ratio): {text!r}")
         return False
 
-    # 2. Word-repetition collapse
-    #    a) one word ≥60% of all tokens, or
-    #    b) unique-word ratio is suspiciously low (loops like "Thank you. Thank you. ...")
+    # 2. Word-repetition collapse — only meaningful with enough words to detect a loop.
     words = [w.lower().strip(".,!?;:'\"") for w in text.split()]
     words = [w for w in words if w]
     if len(words) >= 6:
         most, count = Counter(words).most_common(1)[0]
         if count / len(words) > 0.6:
+            logger.debug(f"ASR drop (word loop {most!r}): {text!r}")
             return False
         unique_ratio = len(set(words)) / len(words)
         if unique_ratio < 0.35:
+            logger.debug(f"ASR drop (low unique-word ratio): {text!r}")
             return False
 
-    # 3. Character diversity — fewer than 6 unique chars means nothing useful
-    if len(set(text.lower())) < 6:
+    # 3. Character diversity — fewer than N unique chars means nothing useful.
+    if len(set(text.lower())) < char_diversity_min:
+        logger.debug(f"ASR drop (low char diversity): {text!r}")
         return False
 
     return True

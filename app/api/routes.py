@@ -13,7 +13,7 @@ import shutil
 
 from app.models.schemas import ModalityType, detect_modality, MIME_TYPES, EXTENSION_TO_MODALITY
 from app.services import perception_service, chroma_service, db_service, bm25_service, reranker_service, asr_service, image_captioner
-from app.services.chunking_service import chunk_content, chunk_text
+from app.services.chunking_service import chunk_content, chunk_text, PDFExtractionError
 from app.core.config import settings
 from app.core.logger import app_logger as logger
 from app.core.security import (
@@ -291,7 +291,16 @@ async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
     }
 
     # Chunkable text-bearing modalities → text path
-    chunks = chunk_content(file_bytes, filename, modality.value)
+    try:
+        chunks = chunk_content(file_bytes, filename, modality.value)
+    except PDFExtractionError as e:
+        # Surface a clear reason; record the failure on the file row.
+        try:
+            rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
+            db_service.update_file_status(rec["id"], "failed", error=str(e))
+        except Exception as _e:
+            logger.warning(f"db_service failed-row write failed: {_e}")
+        raise HTTPException(status_code=400, detail=f"PDF unreadable: {e}")
 
     if chunks:
         items = []
@@ -743,6 +752,87 @@ async def list_vault_files_endpoint(request: Request, name: str, status: Optiona
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     return {"vault": name, "status_filter": status, "count": len(files), "files": files}
+
+
+# ── Orphan upload sweep ──────────────────────────────────────────
+
+def _sweep_orphans(vault: str, dry_run: bool = False) -> Dict:
+    """Delete files in uploads/<vault>/ whose doc_id has no chunks in Chroma.
+
+    Files are stored as `<doc_id><ext>` (see _save_file), so we strip the
+    extension to recover the doc_id and compare against the live set in
+    the vector store. Returns counts + the list of removed/orphan paths.
+    """
+    vault_dir = os.path.join(settings.upload_dir, vault)
+    if not os.path.isdir(vault_dir):
+        return {"vault": vault, "scanned": 0, "orphans": 0, "removed": [], "kept": 0}
+
+    referenced = chroma_service.list_referenced_doc_ids(vault)
+    removed: List[str] = []
+    kept = 0
+    scanned = 0
+
+    for entry in os.listdir(vault_dir):
+        full = os.path.join(vault_dir, entry)
+        if not os.path.isfile(full):
+            continue
+        scanned += 1
+        doc_id = os.path.splitext(entry)[0]
+        if doc_id in referenced:
+            kept += 1
+            continue
+        # Orphan
+        if not dry_run:
+            try:
+                os.remove(full)
+            except OSError as e:
+                logger.warning(f"orphan sweep: could not remove {full}: {e}")
+                continue
+        removed.append(entry)
+
+    return {
+        "vault": vault,
+        "scanned": scanned,
+        "orphans": len(removed),
+        "removed": removed,
+        "kept": kept,
+        "dry_run": dry_run,
+    }
+
+
+def sweep_all_vaults_orphans() -> Dict:
+    """Run the orphan sweep across every vault on disk. Best-effort; logs only."""
+    base = settings.upload_dir
+    if not os.path.isdir(base):
+        return {"vaults": 0, "total_orphans": 0}
+    total = 0
+    n_vaults = 0
+    for entry in os.listdir(base):
+        full = os.path.join(base, entry)
+        if not os.path.isdir(full):
+            continue
+        try:
+            res = _sweep_orphans(entry, dry_run=False)
+        except Exception as e:
+            logger.warning(f"orphan sweep failed for vault {entry!r}: {e}")
+            continue
+        n_vaults += 1
+        total += res["orphans"]
+        if res["orphans"]:
+            logger.info(f"orphan sweep: vault={entry!r} removed={res['orphans']} kept={res['kept']}")
+    return {"vaults": n_vaults, "total_orphans": total}
+
+
+@router.post("/admin/orphans/{vault_name}")
+async def sweep_vault_orphans_endpoint(request: Request, vault_name: str, dry_run: bool = False):
+    """Admin: delete uploaded files in a vault whose chunks are gone from Chroma.
+
+    `?dry_run=true` reports what would be removed without touching disk.
+    """
+    validate_admin_auth(request)
+    if not chroma_service.get_collection(vault_name):
+        raise HTTPException(status_code=404, detail=f"Store '{vault_name}' not found")
+    return _sweep_orphans(vault_name, dry_run=dry_run)
 
 
 @router.post("/vaults/{name}/files/{file_id}/retry")
