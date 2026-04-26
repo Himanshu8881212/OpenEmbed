@@ -53,6 +53,54 @@ async def _index_text_chunk(vault: str, chunk_id: str, text: str, base_meta: Dic
     await _index_text_chunks(vault, [{"chunk_id": chunk_id, "text": text, "base_meta": base_meta}])
 
 
+# ── Embed lifecycle helpers ───────────────────────────────────────
+#
+# To keep Chroma and SQLite in sync we follow this protocol per embed:
+#   1. _begin_db_record  → INSERT files row with status='embedding'
+#   2. write to Chroma   → if it fails, _rollback_embed deletes any
+#                          chunks that landed and marks the row 'failed'
+#   3. _mark_indexed     → status='indexed' + chunk_count
+#
+# If db is unavailable for step 1 we still attempt the embed (chroma is
+# the source of truth for retrieval); we just lose the metadata row.
+
+def _begin_db_record(
+    vault: str, filename: str, mime_type: str, modality: str,
+    doc_id: str, size_bytes: int,
+) -> Optional[Dict]:
+    try:
+        return db_service.record_file(
+            vault, filename, mime_type, modality, doc_id, size_bytes,
+            status="embedding",
+        )
+    except Exception as e:
+        logger.warning(f"db_service.record_file failed: {e}")
+        return None
+
+
+def _mark_indexed(rec: Optional[Dict], n_chunks: int) -> None:
+    if rec is None:
+        return
+    try:
+        db_service.update_file_status(rec["id"], "indexed", chunk_count=n_chunks)
+    except Exception as e:
+        logger.warning(f"db_service.update_file_status(indexed) failed: {e}")
+
+
+def _rollback_embed(vault: str, doc_id: str, rec: Optional[Dict], error: BaseException) -> None:
+    """Best-effort cleanup for a partial embed: drop any chunks that landed
+    in Chroma and flip the metadata row to 'failed'."""
+    try:
+        chroma_service.delete_document(vault, doc_id)
+    except Exception as e:
+        logger.warning(f"rollback: chroma delete_document failed: {e}")
+    if rec is not None:
+        try:
+            db_service.update_file_status(rec["id"], "failed", error=str(error)[:500])
+        except Exception as e:
+            logger.warning(f"rollback: db update_file_status(failed) failed: {e}")
+
+
 async def _index_text_chunks(vault: str, items: List[Dict]) -> None:
     """Batch-embed many text chunks into all 3 spaces.
 
@@ -82,6 +130,10 @@ async def _index_text_chunks(vault: str, items: List[Dict]) -> None:
 
 @router.get("/health")
 async def health():
+    """Liveness — process is up and responding. Returns 200 once the app
+    starts, even if models are still warming. Use /api/readiness for the
+    "is the service ready to serve traffic" question.
+    """
     try:
         memory = perception_service.memory_stats()
     except Exception as e:
@@ -93,6 +145,24 @@ async def health():
         "memory": memory,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@router.get("/readiness")
+async def readiness():
+    """Readiness — every dependency that's required to serve a request is up.
+    Returns 503 with details when not ready. Designed for k8s readinessProbe.
+    """
+    checks = {
+        "chromadb": chroma_service.is_ready(),
+        "perception_encoder": perception_service.is_ready(),
+        "sqlite": db_service.is_ready(),
+    }
+    if all(checks.values()):
+        return {"status": "ready", "checks": checks}
+    raise HTTPException(
+        status_code=503,
+        detail={"status": "not_ready", "checks": checks},
+    )
 
 
 # ── Vector Stores ─────────────────────────────────────────────────
@@ -222,12 +292,13 @@ async def embed(
         raise
     except Exception as e:
         logger.exception(f"Embedding failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error during embed")
 
 
 async def _embed_text(vault: str, doc_id: str, text: str) -> dict:
     """Embed raw text input — chunked and indexed into all 3 spaces."""
     chunks_text = chunk_text(text) if len(text) > settings.chunk_size else [text]
+    size_bytes = len(text.encode("utf-8"))
 
     timestamp = datetime.utcnow().isoformat()
     items = [
@@ -245,13 +316,14 @@ async def _embed_text(vault: str, doc_id: str, text: str) -> dict:
         }
         for i, ct in enumerate(chunks_text)
     ]
-    await _index_text_chunks(vault, items)
 
+    rec = _begin_db_record(vault, "text_input", "text/plain", "text", doc_id, size_bytes)
     try:
-        rec = db_service.record_file(vault, "text_input", "text/plain", "text", doc_id, len(text.encode("utf-8")))
-        db_service.update_file_status(rec["id"], "indexed", chunk_count=len(chunks_text))
-    except Exception as _e:
-        logger.warning(f"db_service.record_file failed: {_e}")
+        await _index_text_chunks(vault, items)
+    except Exception as e:
+        _rollback_embed(vault, doc_id, rec, e)
+        raise
+    _mark_indexed(rec, len(chunks_text))
 
     return {
         "success": True,
@@ -290,16 +362,15 @@ async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
         "timestamp": datetime.utcnow().isoformat(),
     }
 
+    # Open the metadata row first so any failure below (chunking, chroma)
+    # leaves a queryable trail.
+    rec = _begin_db_record(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
+
     # Chunkable text-bearing modalities → text path
     try:
         chunks = chunk_content(file_bytes, filename, modality.value)
     except PDFExtractionError as e:
-        # Surface a clear reason; record the failure on the file row.
-        try:
-            rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
-            db_service.update_file_status(rec["id"], "failed", error=str(e))
-        except Exception as _e:
-            logger.warning(f"db_service failed-row write failed: {_e}")
+        _rollback_embed(vault, doc_id, rec, e)
         raise HTTPException(status_code=400, detail=f"PDF unreadable: {e}")
 
     if chunks:
@@ -315,13 +386,12 @@ async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
                 "text": chunk["text"],
                 "base_meta": meta,
             })
-        await _index_text_chunks(vault, items)
-
         try:
-            rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
-            db_service.update_file_status(rec["id"], "indexed", chunk_count=len(chunks))
-        except Exception as _e:
-            logger.warning(f"db_service.record_file failed: {_e}")
+            await _index_text_chunks(vault, items)
+        except Exception as e:
+            _rollback_embed(vault, doc_id, rec, e)
+            raise
+        _mark_indexed(rec, len(chunks))
 
         return {
             "success": True,
@@ -341,6 +411,34 @@ async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
     chunk_id = f"{doc_id}_chunk_0"
     base_meta.update({"chunk_index": 0, "total_chunks": 1})
 
+    try:
+        n_chunks = await _embed_non_chunkable(
+            vault, doc_id, file_bytes, ext, filename, modality, base_meta, chunk_id,
+        )
+    except Exception as e:
+        _rollback_embed(vault, doc_id, rec, e)
+        raise
+
+    _mark_indexed(rec, n_chunks)
+
+    return {
+        "success": True,
+        "id": doc_id,
+        "modality": modality.value,
+        "filename": filename,
+        "chunks": n_chunks,
+        "dimensions": perception_service.EMBEDDING_DIM,
+        "store": vault,
+        "file_url": file_url,
+    }
+
+
+async def _embed_non_chunkable(
+    vault: str, doc_id: str, file_bytes: bytes, ext: str, filename: str,
+    modality: ModalityType, base_meta: Dict, chunk_id: str,
+) -> int:
+    """Per-modality chroma writes for image/audio/video/text fallback.
+    Returns the number of chunks written. Caller wraps in try/except for rollback."""
     if modality == ModalityType.IMAGE:
         # Caption once per image — gives the cross-encoder reranker real prose
         # to score against (the synthesized "image eiffel tower" loses to any
@@ -450,22 +548,10 @@ async def _embed_file(vault: str, doc_id: str, file: UploadFile) -> dict:
     else:
         raise HTTPException(status_code=400, detail=f"No encoder for modality '{modality.value}'")
 
-    try:
-        rec = db_service.record_file(vault, filename, mime_type, modality.value, doc_id, len(file_bytes))
-        db_service.update_file_status(rec["id"], "indexed", chunk_count=n_chunks)
-    except Exception as _e:
-        logger.warning(f"db_service.record_file failed: {_e}")
+    return n_chunks
 
-    return {
-        "success": True,
-        "id": doc_id,
-        "modality": modality.value,
-        "filename": filename,
-        "chunks": n_chunks,
-        "dimensions": perception_service.EMBEDDING_DIM,
-        "store": vault,
-        "file_url": file_url,
-    }
+
+_MAX_BATCH_FILES = 50
 
 
 @router.post("/embed/batch")
@@ -480,6 +566,12 @@ async def embed_batch(
 
     if not chroma_service.get_collection(vector_store):
         raise HTTPException(status_code=404, detail=f"Store '{vector_store}' not found")
+
+    if len(files) > _MAX_BATCH_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Batch size {len(files)} exceeds limit of {_MAX_BATCH_FILES} files",
+        )
 
     results = []
     for file in files:
@@ -582,8 +674,8 @@ async def search(
     vector_store: str = Form(...),
     query: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
-    n_results: int = Form(10),
-    min_similarity: float = Form(0.0),
+    n_results: int = Form(10, ge=1, le=100),
+    min_similarity: float = Form(0.0, ge=0.0, le=1.0),
 ):
     """Search a vault by text or by file (modality auto-detected)."""
     validate_request_auth(request, vector_store)
@@ -634,7 +726,7 @@ async def search(
         raise
     except Exception as e:
         logger.exception(f"Search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error during search")
 
 
 # ── RAG Retrieve ──────────────────────────────────────────────────
@@ -655,6 +747,17 @@ async def retrieve(request: Request):
 
     if not store_name or not query:
         raise HTTPException(status_code=400, detail="Both 'store' and 'query' are required")
+
+    # Bound the inputs — JSON body has no FastAPI Form validation
+    try:
+        top_k = int(top_k)
+        min_similarity = float(min_similarity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="top_k must be int, min_similarity must be float")
+    if not (1 <= top_k <= 100):
+        raise HTTPException(status_code=400, detail="top_k must be in [1, 100]")
+    if not (0.0 <= min_similarity <= 1.0):
+        raise HTTPException(status_code=400, detail="min_similarity must be in [0.0, 1.0]")
 
     validate_request_auth(request, store_name)
 
@@ -687,7 +790,7 @@ async def retrieve(request: Request):
         return {"context": context}
     except Exception as e:
         logger.exception(f"Retrieve failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error during retrieve")
 
 
 # ── Auth-gated file serving ──────────────────────────────────────

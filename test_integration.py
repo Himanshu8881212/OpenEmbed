@@ -86,6 +86,33 @@ def preflight() -> dict:
     ok(f"backend up — status={health.get('status')}")
     if not health.get("perception_encoder"):
         print(f"  {DIM}note: perception encoder not ready — embed/search will fail{RESET}")
+
+    # /readiness is optional — older backends don't have it. We only assert
+    # the response shape if the route exists.
+    try:
+        rr = httpx.get(f"{BASE_URL}/api/readiness", timeout=5)
+    except httpx.HTTPError as e:
+        print(f"  {DIM}/readiness skipped: {e}{RESET}")
+        return health
+    if rr.status_code == 404:
+        print(f"  {DIM}/readiness not present (older backend){RESET}")
+    elif rr.status_code in (200, 503):
+        try:
+            body = rr.json()
+        except Exception:
+            print(f"  {DIM}/readiness returned non-JSON — skipping{RESET}")
+            return health
+        # FastAPI wraps non-200 detail in a `detail` key
+        payload = body.get("detail", body) if rr.status_code == 503 else body
+        checks = payload.get("checks") if isinstance(payload, dict) else None
+        if checks:
+            ok(f"readiness → {rr.status_code} checks={checks}")
+        else:
+            # Catch-all SPA fallback / older backend without the route — soft skip.
+            print(f"  {DIM}/readiness not wired (got {rr.status_code} {body!r}){RESET}")
+    else:
+        fail(f"readiness returned {rr.status_code}: {rr.text[:200]}")
+
     return health
 
 

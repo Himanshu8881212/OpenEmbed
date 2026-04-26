@@ -14,13 +14,54 @@ api.interceptors.request.use((config) => {
 });
 
 // ── localStorage helpers for per-vault keys ──────────────
+//
+// Keys are stored as JSON `{ key, ts }` and expire after VAULT_KEY_TTL_MS.
+// Plain-string entries from older builds are still readable; reading them
+// upgrades the entry to the new format. Expired entries are removed on read.
+
 const KEY_PREFIX = 'embed.vaultKey.';
+const VAULT_KEY_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+interface StoredKey { key: string; ts: number; }
+
+const readRaw = (name: string): StoredKey | string | null => {
+  try {
+    const raw = localStorage.getItem(KEY_PREFIX + name);
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw) as StoredKey;
+      if (parsed && typeof parsed.key === 'string' && typeof parsed.ts === 'number') {
+        return parsed;
+      }
+    }
+    return raw; // legacy plain-string format
+  } catch {
+    return null;
+  }
+};
+
 export const saveVaultKey = (name: string, apiKey: string) => {
-  try { localStorage.setItem(KEY_PREFIX + name, apiKey); } catch { }
+  try {
+    const entry: StoredKey = { key: apiKey, ts: Date.now() };
+    localStorage.setItem(KEY_PREFIX + name, JSON.stringify(entry));
+  } catch { }
 };
+
 export const getVaultKey = (name: string): string => {
-  try { return localStorage.getItem(KEY_PREFIX + name) || ''; } catch { return ''; }
+  const raw = readRaw(name);
+  if (raw === null) return '';
+  if (typeof raw === 'string') {
+    // Legacy entry — upgrade with a fresh timestamp so the TTL clock starts now.
+    saveVaultKey(name, raw);
+    return raw;
+  }
+  if (Date.now() - raw.ts > VAULT_KEY_TTL_MS) {
+    removeVaultKey(name);
+    return '';
+  }
+  return raw.key;
 };
+
 export const removeVaultKey = (name: string) => {
   try { localStorage.removeItem(KEY_PREFIX + name); } catch { }
 };

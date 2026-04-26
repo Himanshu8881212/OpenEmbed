@@ -3,6 +3,7 @@ Cross-encoder reranker (BGE-reranker-v2-m3) — sharper top-K than bi-encoders.
 Lazy-loaded on first use, runs on M3 MPS in fp16.
 """
 import os
+import threading
 from typing import List, Optional, Tuple
 
 import torch
@@ -12,6 +13,7 @@ from app.core.logger import app_logger as logger
 _model = None
 _tokenizer = None
 _device: Optional[torch.device] = None
+_load_lock = threading.Lock()
 
 
 def _get_device() -> torch.device:
@@ -28,7 +30,11 @@ def _get_device() -> torch.device:
 
 def _load():
     global _model, _tokenizer
-    if _model is None:
+    if _model is not None:
+        return _model, _tokenizer
+    with _load_lock:
+        if _model is not None:
+            return _model, _tokenizer
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
         ckpt = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
@@ -66,6 +72,23 @@ def initialize() -> bool:
 
 def is_ready() -> bool:
     return _model is not None
+
+
+def shutdown() -> None:
+    """Drop the reranker model + tokenizer + clear device cache."""
+    global _model, _tokenizer
+    _model = None
+    _tokenizer = None
+    try:
+        import gc as _gc
+        _gc.collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    logger.info("Reranker unloaded")
 
 
 def score(queries: List[str], documents_per_query: List[List[str]], batch_size: int = 32) -> List[List[float]]:

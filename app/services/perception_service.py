@@ -19,6 +19,7 @@ from typing import List, Dict, Optional, Any
 import io
 import os
 import tempfile
+import threading
 import gc
 
 import torch
@@ -36,6 +37,12 @@ _core_preprocess = None
 _core_tokenizer = None
 _av_model = None
 _av_processor = None
+
+# Locks guard the lazy loaders so two concurrent first-callers don't
+# both download / instantiate the model. asyncio.to_thread runs the
+# loader on the threadpool, so a threading.Lock is the correct primitive.
+_core_load_lock = threading.Lock()
+_av_load_lock = threading.Lock()
 
 EMBEDDING_DIM = 1024
 SPACES = ("image", "audio", "video")
@@ -91,7 +98,12 @@ def _free_cpu_copies():
 
 def _load_core():
     global _core_model, _core_preprocess, _core_tokenizer
-    if _core_model is None:
+    # Double-checked locking: avoid the lock on hot reads after first load.
+    if _core_model is not None:
+        return _core_model, _core_preprocess, _core_tokenizer
+    with _core_load_lock:
+        if _core_model is not None:
+            return _core_model, _core_preprocess, _core_tokenizer
         import core.vision_encoder.pe as pe
         import core.vision_encoder.transforms as transforms
 
@@ -114,7 +126,11 @@ def _load_core():
 
 def _load_av():
     global _av_model, _av_processor
-    if _av_model is None:
+    if _av_model is not None:
+        return _av_model, _av_processor
+    with _av_load_lock:
+        if _av_model is not None:
+            return _av_model, _av_processor
         from transformers import PeAudioVideoModel, PeAudioVideoProcessor
 
         device = _get_device()
@@ -291,6 +307,23 @@ def initialize() -> bool:
 def is_ready() -> bool:
     """PE-Core must be loaded; PE-AV may be deferred under PE_AV_LAZY."""
     return _core_model is not None
+
+
+def shutdown() -> None:
+    """Free PE-Core / PE-AV tensors and clear the device cache.
+
+    Called from the FastAPI lifespan on shutdown so a redeploy doesn't pay a
+    second copy of model weights when the new process starts loading before
+    the old one is fully gone.
+    """
+    global _core_model, _core_preprocess, _core_tokenizer, _av_model, _av_processor
+    _core_model = None
+    _core_preprocess = None
+    _core_tokenizer = None
+    _av_model = None
+    _av_processor = None
+    _free_cpu_copies()
+    logger.info("Perception models unloaded")
 
 
 # ── Encoders ────────────────────────────────────────────────────

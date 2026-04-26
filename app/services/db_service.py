@@ -29,59 +29,111 @@ _ready: bool = False
 
 
 def _connect() -> sqlite3.Connection:
-    """Open a new connection. Caller is responsible for closing it."""
-    # 30s is comfortable for embed batches; sqlite's default 5s is too tight.
+    """Open a new connection. Caller is responsible for closing it.
+
+    Each connection sets:
+      foreign_keys=ON     — referential integrity (off by default in sqlite)
+      busy_timeout=30000  — wait 30s on locks rather than failing instantly
+    WAL mode is set once at init (it is a database-level pragma, not per-conn)
+    so writers don't block readers.
+    """
+    # 30s timeout is comfortable for embed batches; sqlite's default 5s is too tight.
     conn = sqlite3.connect(_db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
+# ── Schema migrations ────────────────────────────────────────────
+#
+# Each entry is a numbered, append-only SQL block. To bump the schema, add
+# the next-numbered key with the diff. NEVER edit a previous migration —
+# they may already be applied on production databases.
+
+_MIGRATIONS: Dict[int, str] = {
+    1: """
+        CREATE TABLE IF NOT EXISTS vaults (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS files (
+            id            TEXT PRIMARY KEY,
+            vault_id      TEXT NOT NULL,
+            filename      TEXT NOT NULL,
+            mime_type     TEXT NOT NULL DEFAULT '',
+            modality      TEXT NOT NULL DEFAULT '',
+            status        TEXT NOT NULL DEFAULT 'queued'
+                            CHECK (status IN ('queued','embedding','indexed','failed')),
+            size_bytes    INTEGER NOT NULL DEFAULT 0,
+            doc_id        TEXT NOT NULL DEFAULT '',
+            chunk_count   INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            uploaded_at   TEXT NOT NULL,
+            indexed_at    TEXT,
+            FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_files_vault   ON files(vault_id);
+        CREATE INDEX IF NOT EXISTS idx_files_doc_id  ON files(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_files_status  ON files(status);
+    """,
+}
+
+
+def _current_schema_version(conn: sqlite3.Connection) -> int:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
+    )
+    row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    cur = conn.execute("UPDATE schema_version SET version = ?", (version,))
+    if cur.rowcount == 0:
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply any migrations newer than the recorded schema_version."""
+    current = _current_schema_version(conn)
+    target = max(_MIGRATIONS) if _MIGRATIONS else 0
+    if current >= target:
+        return
+    for v in sorted(_MIGRATIONS):
+        if v <= current:
+            continue
+        conn.executescript(_MIGRATIONS[v])
+        _set_schema_version(conn, v)
+        conn.commit()
+        logger.info(f"DB migrated v{current} → v{v}")
+        current = v
+
+
 def initialize() -> bool:
-    """Create the SQLite file (if needed) and ensure schema exists."""
+    """Create the SQLite file (if needed), set durability pragmas, and run migrations."""
     global _db_path, _ready
     try:
         _db_path = settings.sqlite_path
         with _lock:
             conn = _connect()
             try:
-                conn.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS vaults (
-                        id          TEXT PRIMARY KEY,
-                        name        TEXT NOT NULL UNIQUE,
-                        description TEXT NOT NULL DEFAULT '',
-                        created_at  TEXT NOT NULL,
-                        updated_at  TEXT NOT NULL
-                    );
-
-                    CREATE TABLE IF NOT EXISTS files (
-                        id            TEXT PRIMARY KEY,
-                        vault_id      TEXT NOT NULL,
-                        filename      TEXT NOT NULL,
-                        mime_type     TEXT NOT NULL DEFAULT '',
-                        modality      TEXT NOT NULL DEFAULT '',
-                        status        TEXT NOT NULL DEFAULT 'queued'
-                                        CHECK (status IN ('queued','embedding','indexed','failed')),
-                        size_bytes    INTEGER NOT NULL DEFAULT 0,
-                        doc_id        TEXT NOT NULL DEFAULT '',
-                        chunk_count   INTEGER NOT NULL DEFAULT 0,
-                        error_message TEXT,
-                        uploaded_at   TEXT NOT NULL,
-                        indexed_at    TEXT,
-                        FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_files_vault   ON files(vault_id);
-                    CREATE INDEX IF NOT EXISTS idx_files_doc_id  ON files(doc_id);
-                    CREATE INDEX IF NOT EXISTS idx_files_status  ON files(status);
-                    """
-                )
-                conn.commit()
+                # Database-level pragmas — set once. WAL keeps writers from
+                # blocking readers; synchronous=NORMAL is the standard WAL
+                # pairing (full=stronger durability, normal=faster, both
+                # safe on power loss with WAL).
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute("PRAGMA synchronous = NORMAL")
+                _run_migrations(conn)
             finally:
                 conn.close()
         _ready = True
-        logger.info(f"SQLite metadata DB initialized at {_db_path}")
+        logger.info(f"SQLite metadata DB ready at {_db_path}")
         return True
     except Exception as e:
         logger.error(f"Failed to initialize SQLite: {e}")

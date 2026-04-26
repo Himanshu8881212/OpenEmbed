@@ -388,42 +388,69 @@ def _dedupe_by_id(items: List[Dict]) -> List[Dict]:
 
 # ── MMR diversity & full-vault listing for BM25 ─────────────────
 
+# Page size for vault-wide scans. ChromaDB's `get()` returns the entire
+# collection by default, which OOMs at scale. 1k keeps memory bounded
+# while staying large enough that paging overhead is negligible.
+_SCAN_PAGE_SIZE = 1000
+
+
+def _iter_collection_pages(col, include: List[str]):
+    """Yield successive `col.get(...)` pages of size _SCAN_PAGE_SIZE.
+
+    Stops when a page comes back empty or shorter than the page size.
+    """
+    offset = 0
+    while True:
+        try:
+            data = col.get(include=include, limit=_SCAN_PAGE_SIZE, offset=offset)
+        except Exception:
+            return
+        ids = data.get("ids") or []
+        if not ids:
+            return
+        yield data
+        if len(ids) < _SCAN_PAGE_SIZE:
+            return
+        offset += _SCAN_PAGE_SIZE
+
+
 def list_referenced_doc_ids(vault: str) -> set:
     """Return the set of doc_ids that have at least one chunk in any space.
 
-    Used by the orphan-upload sweeper to decide which files in
-    uploads/<vault>/ are still backed by the vector store.
+    Streams the vault in pages so memory stays bounded. Used by the
+    orphan-upload sweeper to decide which files in uploads/<vault>/ are
+    still backed by the vector store.
     """
     referenced: set = set()
     for col in _existing_subs(vault):
-        try:
-            data = col.get(include=["metadatas"])
-        except Exception:
-            continue
-        for meta in (data.get("metadatas") or []):
-            if not meta:
-                continue
-            doc_id = meta.get("doc_id")
-            if doc_id:
-                referenced.add(str(doc_id))
+        for data in _iter_collection_pages(col, include=["metadatas"]):
+            for meta in (data.get("metadatas") or []):
+                if not meta:
+                    continue
+                doc_id = meta.get("doc_id")
+                if doc_id:
+                    referenced.add(str(doc_id))
     return referenced
 
 
 def list_all_chunks(vault: str) -> List[tuple]:
     """Return every chunk in a vault as (chunk_id, text, metadata), deduped by chunk id.
-    Used by bm25_service to (re)build the lexical index."""
+
+    Streams the vault in pages so a 1M-chunk vault doesn't allocate gigabytes
+    in a single `col.get()`. Used by bm25_service to (re)build the lexical index.
+    """
     seen: Dict[str, tuple] = {}
     for col in _existing_subs(vault):
-        try:
-            data = col.get(include=["metadatas", "documents"])
-        except Exception:
-            continue
-        for i, cid in enumerate(data.get("ids", [])):
-            if cid in seen:
-                continue
-            text = (data.get("documents") or [""])[i] if data.get("documents") else ""
-            meta = (data.get("metadatas") or [{}])[i] if data.get("metadatas") else {}
-            seen[cid] = (cid, text or "", meta or {})
+        for data in _iter_collection_pages(col, include=["metadatas", "documents"]):
+            ids = data.get("ids", [])
+            docs = data.get("documents") or [""] * len(ids)
+            metas = data.get("metadatas") or [{}] * len(ids)
+            for i, cid in enumerate(ids):
+                if cid in seen:
+                    continue
+                text = docs[i] if i < len(docs) else ""
+                meta = metas[i] if i < len(metas) else {}
+                seen[cid] = (cid, text or "", meta or {})
     return list(seen.values())
 
 

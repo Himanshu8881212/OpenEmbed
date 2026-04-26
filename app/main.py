@@ -77,6 +77,16 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup complete")
     yield
     logger.info("Shutting down...")
+    # Free model weights so a redeploy doesn't have two copies of PE-AV
+    # (~8 GB) competing for GPU/MPS memory during the handoff.
+    try:
+        reranker_service.shutdown()
+    except Exception as e:
+        logger.warning(f"reranker shutdown failed: {e}")
+    try:
+        perception_service.shutdown()
+    except Exception as e:
+        logger.warning(f"perception shutdown failed: {e}")
 
 
 app = FastAPI(
