@@ -608,8 +608,15 @@ async def _smart_text_retrieve(
     use_rerank: bool = True,
     pool_size: int = 50,
     rrf_k: int = 60,
+    min_rerank_score: Optional[float] = None,
 ) -> List[Dict]:
-    """Pipeline: dense × 3 PE spaces + BM25 → RRF → cross-encoder rerank → MMR (text diversity) → top-K."""
+    """Pipeline: dense × 3 PE spaces + BM25 → RRF → cross-encoder rerank → MMR (text diversity) → top-K.
+
+    `min_rerank_score` (when set) drops hits whose cross-encoder logit is below
+    the threshold. Cross-encoder logits are roughly: ≥0 confidently on-topic,
+    -3..0 borderline, ≤-8 junk. -3 is a good "only relevant" floor. The filter
+    is skipped when the reranker isn't ready (no scores to compare against).
+    """
     embeds = await asyncio.to_thread(perception_service.encode_text_all, query)
     per_space = {}
     for space, embed in embeds.items():
@@ -644,16 +651,30 @@ async def _smart_text_retrieve(
 
     # Cross-encoder rerank over a generous candidate set first
     rerank_pool = max(top_k * 4, 20)
+    rerank_used = False
     if use_rerank and reranker_service.is_ready():
         try:
             merged = await asyncio.to_thread(
                 reranker_service.rerank, query, merged[:rerank_pool], top_k=rerank_pool
             )
+            rerank_used = True
         except Exception as e:
             logger.warning(f"Reranker failed, falling back to RRF order: {e}")
             merged = merged[:rerank_pool]
     else:
         merged = merged[:rerank_pool]
+
+    # Apply rerank-score floor — only meaningful when the reranker actually ran.
+    if rerank_used and min_rerank_score is not None:
+        kept = [h for h in merged if h.get("rerank_score", float("-inf")) >= min_rerank_score]
+        if not kept:
+            logger.info(
+                f"min_rerank_score={min_rerank_score} dropped all {len(merged)} candidates "
+                f"(top score={merged[0].get('rerank_score') if merged else None})"
+            )
+        merged = kept
+        if not merged:
+            return []
 
     # MMR diversifies on the reranker-ordered list using text overlap
     if use_mmr:
@@ -676,8 +697,15 @@ async def search(
     file: Optional[UploadFile] = File(None),
     n_results: int = Form(10, ge=1, le=100),
     min_similarity: float = Form(0.0, ge=0.0, le=1.0),
+    min_rerank_score: Optional[float] = Form(None),
 ):
-    """Search a vault by text or by file (modality auto-detected)."""
+    """Search a vault by text or by file (modality auto-detected).
+
+    `min_rerank_score` (optional) drops hits whose cross-encoder logit is
+    below the threshold. Cleaner cutoff than `min_similarity`: ≥0 is
+    confidently on-topic, -3 is a good "only relevant" floor, ≤-8 is junk.
+    Only applies to text queries (file queries skip the reranker).
+    """
     validate_request_auth(request, vector_store)
 
     if not query and not file:
@@ -688,7 +716,10 @@ async def search(
 
     try:
         if query:
-            results = await _smart_text_retrieve(vector_store, query, n_results, min_similarity)
+            results = await _smart_text_retrieve(
+                vector_store, query, n_results, min_similarity,
+                min_rerank_score=min_rerank_score,
+            )
             query_info = {"type": "text", "query": query}
         else:
             modality, mime_type = detect_modality(file.filename)
@@ -709,7 +740,10 @@ async def search(
                 results = chroma_service.search_space(vector_store, "video", emb, n_results, min_similarity)
             elif modality == ModalityType.TEXT:
                 text_content = file_bytes.decode("utf-8", errors="replace")[:settings.chunk_size]
-                results = await _smart_text_retrieve(vector_store, text_content, n_results, min_similarity)
+                results = await _smart_text_retrieve(
+                    vector_store, text_content, n_results, min_similarity,
+                    min_rerank_score=min_rerank_score,
+                )
             else:
                 raise HTTPException(status_code=400, detail=f"Unsupported query modality '{modality.value}'")
 
@@ -744,6 +778,7 @@ async def retrieve(request: Request):
     query = body.get("query")
     top_k = body.get("top_k", 5)
     min_similarity = body.get("min_similarity", 0.0)
+    min_rerank_score = body.get("min_rerank_score")  # None = no rerank floor
 
     if not store_name or not query:
         raise HTTPException(status_code=400, detail="Both 'store' and 'query' are required")
@@ -752,8 +787,13 @@ async def retrieve(request: Request):
     try:
         top_k = int(top_k)
         min_similarity = float(min_similarity)
+        if min_rerank_score is not None:
+            min_rerank_score = float(min_rerank_score)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="top_k must be int, min_similarity must be float")
+        raise HTTPException(
+            status_code=400,
+            detail="top_k must be int; min_similarity and min_rerank_score must be float",
+        )
     if not (1 <= top_k <= 100):
         raise HTTPException(status_code=400, detail="top_k must be in [1, 100]")
     if not (0.0 <= min_similarity <= 1.0):
@@ -765,7 +805,10 @@ async def retrieve(request: Request):
         raise HTTPException(status_code=404, detail=f"Store '{store_name}' not found")
 
     try:
-        results = await _smart_text_retrieve(store_name, query, top_k, min_similarity)
+        results = await _smart_text_retrieve(
+            store_name, query, top_k, min_similarity,
+            min_rerank_score=min_rerank_score,
+        )
 
         context = []
         for r in results:
@@ -777,6 +820,11 @@ async def retrieve(request: Request):
                 "matched_space": r.get("space", ""),
                 "relevance": r.get("similarity", 0),
             }
+            # Surface the cross-encoder logit when the reranker ran. It's a
+            # cleaner signal than `relevance` (cosine) — clients can use it
+            # to set thresholds without re-running their own ranker.
+            if "rerank_score" in r:
+                item["rerank_score"] = r["rerank_score"]
             if "page_numbers" in meta:
                 item["page"] = meta["page_numbers"]
             if "section" in meta:

@@ -48,6 +48,20 @@ Open **<http://localhost:8000>**
 
 Auth is via the `X-API-Key` header. `/api/files/...` also accepts `?api_key=...` so `<img>`/`<video>` tags work. Full OpenAPI docs at `/docs`.
 
+### Filtering retrieval results
+
+Two thresholds control how strict retrieval is. Both are optional; both apply
+to text queries (file queries skip the reranker).
+
+| Param              | What it filters       | Range          | Recommended for "only relevant" |
+|--------------------|-----------------------|----------------|---------------------------------|
+| `min_similarity`   | per-space cosine sim  | `0.0` – `1.0`  | `0.6` – `0.7`                   |
+| `min_rerank_score` | cross-encoder logit   | `-15` – `+10`  | `-3` (drops off-topic / nonsense) |
+
+`min_rerank_score` is the cleaner cutoff: ≥ 0 is confidently on-topic, ≈ -3 is
+the borderline floor, ≤ -8 is junk. Each `/api/retrieve` result includes a
+`rerank_score` so callers can pick their own threshold post-hoc.
+
 ## Stack
 
 - **Backend**: FastAPI + ChromaDB + SQLite (vault metadata) + BM25 + cross-encoder reranker
