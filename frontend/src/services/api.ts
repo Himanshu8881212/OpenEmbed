@@ -160,10 +160,13 @@ export const embedBatch = async (store: string, files: File[]): Promise<any> => 
 
 // ── Search (per-vault key) ──────────────────────────────
 
-// Cross-encoder logit floor: ≥0 confidently on-topic, ≈-3 borderline,
-// ≤-8 junk. -3 drops off-topic / nonsense matches without losing legitimate
-// semantic hits. Pass `null` to disable filtering.
-export const DEFAULT_MIN_RERANK_SCORE = -3;
+// Cross-encoder logit floor. Calibrated against an internal eval set:
+//   ~+5  lexical exact match
+//   ~-3  legitimate paraphrase ("blood color of cephalopods" → octopus doc)
+//   ~-10 off-topic / nonsense
+// -5 leaves a comfortable gap above paraphrase floor and below junk.
+// Pass `null` to disable filtering entirely (recall-heavy mode).
+export const DEFAULT_MIN_RERANK_SCORE = -5;
 
 export const searchText = async (
   store: string,

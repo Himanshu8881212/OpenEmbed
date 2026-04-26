@@ -56,11 +56,25 @@ to text queries (file queries skip the reranker).
 | Param              | What it filters       | Range          | Recommended for "only relevant" |
 |--------------------|-----------------------|----------------|---------------------------------|
 | `min_similarity`   | per-space cosine sim  | `0.0` – `1.0`  | `0.6` – `0.7`                   |
-| `min_rerank_score` | cross-encoder logit   | `-15` – `+10`  | `-3` (drops off-topic / nonsense) |
+| `min_rerank_score` | cross-encoder logit   | `-15` – `+10`  | `-5` (drops off-topic / nonsense, keeps paraphrase) |
 
-`min_rerank_score` is the cleaner cutoff: ≥ 0 is confidently on-topic, ≈ -3 is
-the borderline floor, ≤ -8 is junk. Each `/api/retrieve` result includes a
-`rerank_score` so callers can pick their own threshold post-hoc.
+`min_rerank_score` is the cleaner cutoff. Calibration on an internal eval set
+(`scripts/eval.py`): lexical exact ≈ +5, legitimate paraphrase ≈ -3 to -4,
+off-topic / nonsense ≈ -10. Default is -5 — drops junk while keeping
+paraphrase. Each `/api/retrieve` result includes a `rerank_score` so callers
+can pick their own threshold post-hoc.
+
+### Retrieval quality (`scripts/eval.py`)
+
+Run an end-to-end retrieval evaluation against your live backend:
+
+```bash
+python scripts/eval.py
+```
+
+Builds a small gold-labeled corpus, fires hard queries (paraphrase, distractor,
+multi-hop, rare-entity, out-of-domain), reports Hit@5, MRR, P@5, and out-of-domain
+rejection rate. Use it to tune thresholds before changing prod config.
 
 ## Stack
 
