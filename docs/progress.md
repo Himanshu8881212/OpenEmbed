@@ -31,5 +31,5 @@ python3 examples/dune/rag.py --selftest   # DUNE demo (needs ~/Downloads/DUNE Ba
 ```
 
 ## Known gaps
-- No git commits (no author identity configured, E01); CI workflow not run remotely.
+- Published to https://github.com/Himanshu8881212/OpenEmbed. The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on push; its first remote run has not been verified yet (it needs about 8 GB RAM and downloads the pinned models).
 - External gates: production IdP/SMTP/hosting/TLS, capacity (GPU) plan, security review, pilot, commercial/legal (`docs/release-gates.md`).

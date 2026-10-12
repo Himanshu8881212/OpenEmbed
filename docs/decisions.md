@@ -68,4 +68,4 @@ Format: ID — decision. Reason. Tradeoff / upgrade path.
 - D68 — Video detail is set by `max_soft_tokens` per frame (passed to the processor as `processing_kwargs`). 280 tokens × 20 frames (20 s at 1 fps) plus overhead stays under 8,192. Query-time media uses the same settings as the index.
 
 ## Blockers / external
-- E01 — git has no author identity configured, so no commits are made. Work stays uncommitted in the working tree.
+- E01 — (resolved 2026-10-12) Published to https://github.com/Himanshu8881212/OpenEmbed (history replaced on request). The repository-local author is `Himanshu8881212 <Himanshu8881212@users.noreply.github.com>`.
