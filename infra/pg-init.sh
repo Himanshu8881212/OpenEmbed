@@ -1,0 +1,8 @@
+#!/bin/sh
+# Non-owner login roles. RLS applies to them; they never own tables.
+set -e
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+CREATE ROLE kb_api LOGIN PASSWORD '$KB_API_PASSWORD' NOBYPASSRLS;
+CREATE ROLE kb_worker LOGIN PASSWORD '$KB_WORKER_PASSWORD' NOBYPASSRLS;
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL

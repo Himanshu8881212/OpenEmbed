@@ -1,0 +1,11 @@
+{"metric": "answer@1: expected fact string appears in the top-1 passage", "threshold": 0.6, "queries": [
+ {"q": "What wind speed is allowed for hub entry?", "fact": "8 m/s"},
+ {"q": "Which oil grade does the gearbox use?", "fact": "ISO VG 320"},
+ {"q": "How many litres of oil does the gearbox hold?", "fact": "210 litres"},
+ {"q": "What torque for the gearbox torque arm bolts?", "fact": "2,850 Nm"},
+ {"q": "How much grease does the main bearing need?", "fact": "400 g"},
+ {"q": "When must the yaw brake pads be replaced?", "fact": "3 mm"},
+ {"q": "How deep can leading edge erosion be before repair?", "fact": "1 mm"},
+ {"q": "What resistance must blade lightning receptors show?", "fact": "50 milliohm"},
+ {"q": "How often is the transformer oil sampled?", "fact": "once a year"},
+ {"q": "Which part number is the gearbox oil filter?", "fact": "GX-18"}]}

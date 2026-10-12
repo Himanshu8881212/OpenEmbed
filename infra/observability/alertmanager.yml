@@ -1,0 +1,15 @@
+# Dev: delivers to Mailpit (http://localhost:8026). Production: set a real smarthost, sender and recipients.
+route:
+  receiver: ops-email
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+receivers:
+  - name: ops-email
+    email_configs:
+      - to: ops@knowledge-store.local
+        from: alerts@knowledge-store.local
+        smarthost: mailpit:1025
+        require_tls: false
+        send_resolved: true

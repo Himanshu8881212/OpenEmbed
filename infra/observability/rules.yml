@@ -1,0 +1,48 @@
+# Each alert names the user-visible impact and the first action (docs/operations.md, "Alerts").
+groups:
+  - name: knowledge-store
+    rules:
+      - alert: KBApiDown
+        expr: up{job="kb-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: "API not reachable by Prometheus", action: "Check the API process / load balancer and GET /readyz." }
+      - alert: KBInferenceDown
+        expr: up{job="kb-inference"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: "Inference service down: search and imports fail with 503", action: "Restart kbpy.inference; check model load and memory." }
+      - alert: KBWorkersDown
+        expr: kb_workers_alive == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: "No live workers: imports, deletions and cleanup are not progressing", action: "Start kbpy.worker processes; check worker logs." }
+      - alert: KBQueueStalled
+        expr: sum(kb_queue_tasks{status="todo"}) > 0 and delta(sum(kb_job_items{state="succeeded"})[15m:1m]) == 0
+        for: 15m
+        labels: { severity: warning }
+        annotations: { summary: "Tasks are queued but no item finished in 15 minutes", action: "Check workers and inference saturation; look for stuck jobs." }
+      - alert: KBQueueBacklog
+        expr: sum(kb_queue_tasks{status="todo"}) > 500
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Import backlog above 500 tasks", action: "Add worker / inference capacity (KB_INFERENCE_IMPORT_URL) or GPU." }
+      - alert: KBInferenceSaturated
+        expr: avg_over_time(kb_inference_busy[10m]) > 0.9 and avg_over_time(kb_inference_waiting[10m]) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Inference busy >90% with requests waiting", action: "Run more inference processes or a GPU host; separate query and import hosts." }
+      - alert: KBJobItemFailures
+        expr: delta(sum(kb_job_items{state="failed"})[15m:1m]) > 10
+        labels: { severity: warning }
+        annotations: { summary: "More than 10 import items failed in 15 minutes", action: "Read GET /v1/jobs/{id}/items error codes; retry if SERVICE_UNAVAILABLE." }
+      - alert: KBHigh5xxRate
+        expr: sum(rate(kb_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(kb_http_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "More than 5% of API requests fail with 5xx", action: "Check API logs by request_id and dependencies (/readyz)." }
+      - alert: KBSlowSearch
+        expr: histogram_quantile(0.95, sum by (le) (rate(kb_http_request_duration_seconds_bucket{route="/v1/stores/:id/search"}[5m]))) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Search p95 latency above 2 s", action: "Check inference saturation and database load; consider separate query inference." }

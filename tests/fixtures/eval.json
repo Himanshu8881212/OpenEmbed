@@ -1,0 +1,94 @@
+{
+ "metric": "hit@5 (expected source path among top-5 results)",
+ "threshold": 0.9,
+ "queries": [
+  {
+   "query": "How do I replace the pressure sensor?",
+   "expected_path": "manuals/pressure-sensor.md"
+  },
+  {
+   "query": "torque for PS-400 mounting bolts",
+   "expected_path": "manuals/pressure-sensor.md"
+  },
+  {
+   "query": "steps to flush the cooling system",
+   "expected_path": "manuals/coolant-flush.md"
+  },
+  {
+   "query": "how much should the belt deflect when adjusting tension",
+   "expected_path": "manuals/conveyor-belt.txt"
+  },
+  {
+   "query": "what charge level for storing lithium packs",
+   "expected_path": "manuals/battery-storage.txt"
+  },
+  {
+   "query": "can I fly business class on a short trip",
+   "expected_path": "policies/travel-expenses.md"
+  },
+  {
+   "query": "how many days a week can I work from home",
+   "expected_path": "policies/remote-work.md"
+  },
+  {
+   "query": "how long is paid leave for new parents",
+   "expected_path": "policies/parental-leave.txt"
+  },
+  {
+   "query": "I forgot my password",
+   "expected_path": "it/password-reset.md"
+  },
+  {
+   "query": "paper stuck in the printer",
+   "expected_path": "it/printer-jam.txt"
+  },
+  {
+   "query": "when is lunch served",
+   "expected_path": "kitchen/cafeteria-hours.txt"
+  },
+  {
+   "query": "where do we gather when the fire alarm goes off",
+   "expected_path": "safety/fire-evacuation.md"
+  },
+  {
+   "query": "how often must forklift licences be renewed",
+   "expected_path": "safety/forklift-licence.txt"
+  },
+  {
+   "query": "which oil grade do I use for the air compressor",
+   "expected_path": "manuals/compressor-maintenance.docx"
+  },
+  {
+   "query": "HK-77",
+   "expected_path": "manuals/hydraulic-pump.pdf"
+  },
+  {
+   "query": "CAL-22",
+   "expected_path": "manuals/pressure-sensor.md"
+  },
+  {
+   "query": "ISO VG 46",
+   "expected_path": "manuals/compressor-maintenance.docx"
+  },
+  {
+   "query": "assembly point B north car park",
+   "expected_path": "safety/fire-evacuation.md"
+  },
+  {
+   "query": "where is the emergency shower located",
+   "expected_path": "media/scanned-notice.pdf"
+  },
+  {
+   "query": "unplug the charger before cleaning the battery terminals",
+   "expected_path": "media/charger-briefing.mp4"
+  },
+  {
+   "query": "a red square image",
+   "expected_path": "media/red-square.png"
+  },
+  {
+   "query": "spoken instructions about removing mounting bolts",
+   "expected_path": "media/sensor-instructions.mp3"
+  }
+ ]
+}

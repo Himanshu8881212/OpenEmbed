@@ -1,0 +1,1 @@
+Conveyor belt tensioning. Loosen the take-up frame bolts, turn the adjustment screws evenly on both sides until the belt deflects 15 mm under a 5 kg load at mid-span, then retighten the frame bolts and check tracking for five minutes.

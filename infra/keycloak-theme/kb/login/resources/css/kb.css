@@ -1,0 +1,82 @@
+/* Ink & Paper sign-in: ink panel with the product promise on the left, paper form on the right. */
+:root {
+  --kb-paper: #f5f2ea; --kb-card: #fff; --kb-ink: #15171d; --kb-text: #1b1d22; --kb-text-2: #4a4f5a; --kb-rule: #d6d0c0;
+  --kb-accent: #d6402a; --kb-accent-ink: #b5321f; --kb-accent-wash: #fbe9e4;
+  --keycloak-card-top-color: transparent;
+  --pf-v5-global--FontFamily--text: "Instrument Sans", ui-sans-serif, sans-serif;
+  --pf-v5-global--FontFamily--heading: "Fraunces", Georgia, serif;
+  --pf-v5-global--primary-color--100: var(--kb-accent);
+  --pf-v5-global--primary-color--200: var(--kb-accent-ink);
+  --pf-v5-global--link--Color: var(--kb-accent-ink);
+  --pf-v5-global--link--Color--hover: var(--kb-accent);
+  --pf-v5-global--active-color--100: var(--kb-accent);
+}
+html.login-pf, .login-pf body {
+  font-family: "Instrument Sans", ui-sans-serif, sans-serif;
+  color: var(--kb-text);
+  background:
+    radial-gradient(520px 360px at 26% 18%, rgb(214 64 42 / .30), transparent 60%),
+    radial-gradient(500px 500px at 8% 92%, rgb(21 122 110 / .24), transparent 60%),
+    linear-gradient(90deg, var(--kb-ink) 0 52%, var(--kb-paper) 52% 100%) !important;
+  background-attachment: fixed !important;
+  min-height: 100vh;
+}
+/* product panel on the ink side (markup in template.ftl) */
+.kb-art { position: fixed; inset: 0 48% 0 0; padding: 48px 56px; display: flex; flex-direction: column; justify-content: space-between; color: #f3f1ea; overflow: hidden; }
+.kb-brand { display: flex; align-items: center; gap: 10px; font-family: "Fraunces", Georgia, serif; font-size: 17px; }
+.kb-mark { width: 28px; height: 28px; border-radius: 7px; background: var(--kb-accent); display: grid; place-items: center; font-weight: 600; color: #fff; box-shadow: inset 0 -2px 0 rgb(0 0 0 / .2); }
+.kb-headline { margin: 0; font-family: "Fraunces", Georgia, serif; font-weight: 400; font-size: clamp(40px, 4.6vw, 68px); line-height: .98; letter-spacing: -.035em; max-width: 12ch; color: #f3f1ea; }
+.kb-headline em { font-style: italic; color: #ff8a72; }
+.kb-lede { color: #b9b8b1; max-width: 46ch; font-size: 15px; line-height: 1.55; margin: 18px 0 0; }
+.kb-ev { margin-top: 28px; display: flex; flex-direction: column; gap: 10px; max-width: 460px; }
+.kb-ev div { display: flex; gap: 12px; align-items: baseline; padding: 12px 14px; border-radius: 12px; background: rgb(255 255 255 / .05); border: 1px solid rgb(255 255 255 / .08); font-family: "Fraunces", Georgia, serif; font-size: 14.5px; animation: kb-rise .6s both; }
+.kb-ev div:nth-child(2) { animation-delay: .15s; } .kb-ev div:nth-child(3) { animation-delay: .3s; }
+.kb-cite { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: rgb(255 138 114 / .15); color: #ffb3a3; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11.5px; }
+.kb-foot { margin: 0; font-size: 12.5px; color: #b9b8b1; }
+@keyframes kb-rise { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .kb-ev div { animation: none; } }
+/* the provider header becomes redundant next to the panel's brand: keep it for the form side only */
+.pf-v5-c-login { min-height: 100vh; }
+.pf-v5-c-login__container { margin-left: 52%; width: 48%; grid-template-columns: minmax(300px, 420px); grid-template-areas: "header" "main"; justify-content: center; align-content: center; min-height: 100vh; }
+/* brand */
+#kc-header-wrapper, .pf-v5-c-login__header { color: var(--kb-text); font-family: "Fraunces", Georgia, serif; font-size: 0; text-transform: none; letter-spacing: normal; padding: 0 0 18px; text-align: left; }
+.pf-v5-c-login__header { padding-inline: 0; }
+#kc-header-wrapper::before, .pf-v5-c-login__header #kc-header-wrapper::before { content: "K"; display: inline-grid; place-items: center; width: 30px; height: 30px; margin-right: 10px; border-radius: 8px; background: var(--kb-accent); color: #fff; font-size: 17px; font-weight: 600; vertical-align: middle; }
+#kc-header-wrapper::after { content: "Knowledge Store"; font-size: 19px; vertical-align: middle; color: var(--kb-text); letter-spacing: -.01em; }
+/* card */
+.pf-v5-c-login__main { background: transparent; box-shadow: none; }
+.pf-v5-c-login__main-header { border: 0; padding-inline: 0; }
+.pf-v5-c-login__main-body, .pf-v5-c-login__main-footer { padding-inline: 0; }
+.pf-v5-c-login__main-header .pf-v5-c-title, #kc-page-title { white-space: nowrap; font-family: "Fraunces", Georgia, serif; font-weight: 500; font-size: 30px; letter-spacing: -.02em; color: var(--kb-text); }
+.pf-v5-c-form__label, .pf-v5-c-form__label-text { color: var(--kb-text-2); font-weight: 600; font-size: 13px; }
+/* fields: one border, one focus ring (PatternFly draws borders with ::before/::after; replace them) */
+.pf-v5-c-form-control { position: relative; display: flex; align-items: center; border: 1px solid var(--kb-rule); border-radius: 10px; background: var(--kb-card); min-height: 44px; transition: border-color .15s, box-shadow .15s; }
+.pf-v5-c-form-control::before, .pf-v5-c-form-control::after { display: none !important; }
+.pf-v5-c-form-control:hover { border-color: #b9b2a1; }
+.pf-v5-c-form-control:focus-within { border-color: var(--kb-accent); box-shadow: 0 0 0 4px var(--kb-accent-wash); }
+.pf-v5-c-form-control > input { height: 42px; padding: 0 12px; border: 0; outline: none !important; background: transparent; font-size: 15px; color: var(--kb-text); width: 100%; }
+.pf-v5-c-form-control.pf-m-error, .pf-v5-c-form-control:has(input[aria-invalid="true"]) { border-color: #b4232f; }
+.pf-v5-c-form-control.pf-m-error:focus-within { box-shadow: 0 0 0 4px #fbe5e6; }
+.pf-v5-c-form-control__utilities { padding-right: 10px; }
+/* password: field + show/hide toggle read as one control */
+.pf-v5-c-input-group { align-items: stretch; }
+.pf-v5-c-input-group > .pf-v5-c-input-group__item.pf-m-fill .pf-v5-c-form-control { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control { height: 100%; min-height: 44px; min-width: 48px; border: 1px solid var(--kb-rule); border-left: 0; border-radius: 0 10px 10px 0; background: var(--kb-card); color: var(--kb-text-2); }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control::after { display: none !important; }
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control:hover { color: var(--kb-text); background: #faf8f3; }
+.pf-v5-c-input-group:focus-within .pf-v5-c-button.pf-m-control { border-color: var(--kb-accent); }
+.pf-v5-c-input-group:focus-within > .pf-v5-c-input-group__item.pf-m-fill .pf-v5-c-form-control { box-shadow: none; }
+.pf-v5-c-input-group:focus-within { border-radius: 10px; box-shadow: 0 0 0 4px var(--kb-accent-wash); }
+.pf-v5-c-helper-text__item-text, .kc-feedback-text { font-size: 13px; }
+#kc-form-options a, .pf-v5-c-login__main-footer-band a, a { text-decoration: none; }
+#kc-form-options a:hover, a:hover { text-decoration: underline; }
+.pf-v5-c-login__main-footer-band { border-top: 1px solid var(--kb-rule) !important; }
+.pf-v5-c-button.pf-m-primary { background: var(--kb-accent); border-radius: 10px; height: 44px; font-weight: 600; box-shadow: 0 1px 0 rgb(0 0 0 / .08), inset 0 1px 0 rgb(255 255 255 / .18); }
+.pf-v5-c-button.pf-m-primary:hover { background: var(--kb-accent-ink); }
+.pf-v5-c-button:focus-visible, a:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.pf-v5-c-alert { border-radius: 10px; }
+@media (max-width: 900px) {
+  html.login-pf, .login-pf body { background: var(--kb-paper) !important; }
+  .kb-art { display: none; }
+  .pf-v5-c-login__container { margin: 0; width: 100%; padding: 32px 20px; }
+}

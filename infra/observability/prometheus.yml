@@ -1,0 +1,16 @@
+# Scrapes the API and the inference service. Production: mount the real token file at /etc/prometheus/metrics-token.
+global: { scrape_interval: 15s, evaluation_interval: 15s }
+rule_files: [/etc/prometheus/rules.yml]
+alerting:
+  alertmanagers: [{ static_configs: [{ targets: ["alertmanager:9093"] }] }]
+scrape_configs:
+  - job_name: kb-api
+    metrics_path: /metrics
+    authorization: { credentials_file: /etc/prometheus/metrics-token }
+    static_configs: [{ targets: ["host.docker.internal:3000"], labels: { service: api } }]
+  - job_name: kb-inference
+    metrics_path: /metrics
+    authorization: { credentials_file: /etc/prometheus/metrics-token }
+    static_configs: [{ targets: ["host.docker.internal:8100"], labels: { service: inference } }]
+  - job_name: prometheus
+    static_configs: [{ targets: ["localhost:9090"] }]

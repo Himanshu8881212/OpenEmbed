@@ -1,0 +1,56 @@
+# Full stack from images (self-hosted / enterprise option). Supply secrets via an env file: docker compose --env-file deploy/prod.env -f deploy/compose.yml up -d
+# The OIDC provider is external (KB_OIDC_ISSUER); any provider with device grant + code/PKCE works.
+name: kb-deploy
+x-env: &env
+  KB_DATABASE_URL: postgres://kb_api:${KB_PG_API_PASSWORD}@postgres:5432/kb
+  KB_WORKER_DATABASE_URL: postgres://kb_worker:${KB_PG_WORKER_PASSWORD}@postgres:5432/kb
+  KB_MIGRATE_DATABASE_URL: postgres://kb_owner:${KB_PG_OWNER_PASSWORD}@postgres:5432/kb
+  KB_S3_ENDPOINT: ${KB_S3_ENDPOINT:-http://s3:8333}
+  KB_S3_REGION: ${KB_S3_REGION:-us-east-1}
+  KB_S3_BUCKET: ${KB_S3_BUCKET:-kb-data}
+  KB_S3_ACCESS_KEY: ${KB_S3_ACCESS_KEY}
+  KB_S3_SECRET_KEY: ${KB_S3_SECRET_KEY}
+  KB_OIDC_ISSUER: ${KB_OIDC_ISSUER}
+  KB_OIDC_CLI_CLIENT_ID: ${KB_OIDC_CLI_CLIENT_ID:-kb-cli}
+  KB_OIDC_ALLOWED_CLIENTS: ${KB_OIDC_ALLOWED_CLIENTS:-kb-cli,kb-web}
+  KB_INFERENCE_URL: http://inference:8100
+  KB_INFERENCE_TOKEN: ${KB_INFERENCE_TOKEN}
+  KB_INFERENCE_DEVICE: ${KB_INFERENCE_DEVICE:-cpu}
+  KB_INFERENCE_DTYPE: ${KB_INFERENCE_DTYPE:-float32}
+  KB_PUBLIC_BASE_URL: ${KB_PUBLIC_BASE_URL}
+  KB_DEFAULT_PLAN: ${KB_DEFAULT_PLAN}
+  KB_RETENTION_SECONDS: ${KB_RETENTION_SECONDS:-604800}
+  KB_CONNECTOR_ALLOWED_HOSTS: ${KB_CONNECTOR_ALLOWED_HOSTS:-}
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg18
+    environment: { POSTGRES_USER: kb_owner, POSTGRES_PASSWORD: "${KB_PG_OWNER_PASSWORD}", POSTGRES_DB: kb, KB_API_PASSWORD: "${KB_PG_API_PASSWORD}", KB_WORKER_PASSWORD: "${KB_PG_WORKER_PASSWORD}" }
+    volumes: [pg:/var/lib/postgresql, ../infra/pg-init.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "kb_owner", "-d", "kb"], interval: 2s, retries: 30 }
+  s3:
+    image: chrislusf/seaweedfs:4.26
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/s3.json -volume.max=0
+    volumes: [s3:/data, ./s3.json:/etc/s3.json:ro]
+  migrate:
+    image: kb-api:local
+    build: { context: .., dockerfile: deploy/api.Dockerfile, args: { NEXT_PUBLIC_KB_OIDC_ISSUER: "${KB_OIDC_ISSUER}" } }
+    command: ["node", "scripts/migrate.mjs"]
+    environment: *env
+    depends_on: { postgres: { condition: service_healthy }, s3: { condition: service_started } }
+    restart: on-failure
+  inference:
+    image: kb-py:local
+    build: { context: .., dockerfile: deploy/py.Dockerfile }
+    command: ["python", "-m", "kbpy.inference"]
+    environment: { <<: *env, KB_INFERENCE_HOST: 0.0.0.0 }
+    volumes: [models:/models]
+  worker:
+    image: kb-py:local
+    environment: *env
+    depends_on: { migrate: { condition: service_completed_successfully } }
+  api:
+    image: kb-api:local
+    environment: *env
+    ports: ["${KB_API_PORT:-3000}:3000"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+volumes: { pg: {}, s3: {}, models: {} }

@@ -1,0 +1,125 @@
+{
+ "realm": "kb",
+ "enabled": true,
+ "accessTokenLifespan": 900,
+ "oauth2DeviceCodeLifespan": 600,
+ "oauth2DevicePollingInterval": 5,
+ "clients": [
+  {
+   "clientId": "kb-cli",
+   "name": "kb CLI",
+   "publicClient": true,
+   "standardFlowEnabled": false,
+   "directAccessGrantsEnabled": false,
+   "attributes": {
+    "oauth2.device.authorization.grant.enabled": "true"
+   }
+  },
+  {
+   "clientId": "kb-web",
+   "name": "kb workbench",
+   "publicClient": true,
+   "standardFlowEnabled": true,
+   "directAccessGrantsEnabled": false,
+   "redirectUris": [
+    "http://localhost:3000/*"
+   ],
+   "webOrigins": [
+    "http://localhost:3000"
+   ],
+   "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "post.logout.redirect.uris": "http://localhost:3000/*"
+   }
+  },
+  {
+   "clientId": "kb-test",
+   "name": "DEV ONLY automated tests",
+   "publicClient": true,
+   "standardFlowEnabled": false,
+   "directAccessGrantsEnabled": true
+  }
+ ],
+ "users": [
+  {
+   "username": "alice",
+   "enabled": true,
+   "email": "alice@example.com",
+   "emailVerified": true,
+   "firstName": "Alice",
+   "lastName": "Dev",
+   "credentials": [
+    {
+     "type": "password",
+     "value": "dev-alice-password",
+     "temporary": false
+    }
+   ],
+   "id": "0a11ce00-0000-4000-8000-000000000001"
+  },
+  {
+   "username": "bob",
+   "enabled": true,
+   "email": "bob@example.com",
+   "emailVerified": true,
+   "firstName": "Bob",
+   "lastName": "Dev",
+   "credentials": [
+    {
+     "type": "password",
+     "value": "dev-bob-password",
+     "temporary": false
+    }
+   ],
+   "id": "0b0b0000-0000-4000-8000-000000000002"
+  },
+  {
+   "username": "carol",
+   "enabled": true,
+   "email": "carol@example.com",
+   "emailVerified": true,
+   "firstName": "Carol",
+   "lastName": "Dev",
+   "credentials": [
+    {
+     "type": "password",
+     "value": "dev-carol-password",
+     "temporary": false
+    }
+   ],
+   "id": "0ca401e0-0000-4000-8000-000000000003"
+  },
+  {
+   "username": "dave",
+   "enabled": true,
+   "email": "dave@example.com",
+   "emailVerified": true,
+   "firstName": "Dave",
+   "lastName": "Dev",
+   "credentials": [
+    {
+     "type": "password",
+     "value": "dev-dave-password",
+     "temporary": false
+    }
+   ],
+   "id": "0da1e000-0000-4000-8000-000000000004"
+  }
+ ],
+ "loginTheme": "kb",
+ "displayName": "Knowledge Store",
+ "registrationAllowed": true,
+ "registrationEmailAsUsername": true,
+ "verifyEmail": true,
+ "loginWithEmailAllowed": true,
+ "duplicateEmailsAllowed": false,
+ "resetPasswordAllowed": true,
+ "rememberMe": false,
+ "passwordPolicy": "length(12) and notUsername and notEmail",
+ "smtpServer": {
+  "host": "mailpit",
+  "port": "1025",
+  "from": "no-reply@knowledge-store.local",
+  "fromDisplayName": "Knowledge Store"
+ }
+}

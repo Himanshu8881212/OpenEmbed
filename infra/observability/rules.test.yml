@@ -1,0 +1,43 @@
+# promtool unit tests: every alert fires on its condition and stays quiet otherwise.
+# Run: docker compose exec prometheus promtool test rules /etc/prometheus/rules.test.yml
+rule_files: [rules.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - { series: 'up{job="kb-api"}', values: "1 0 0 0" }
+      - { series: 'up{job="kb-inference"}', values: "1 1 1 1" }
+      - { series: 'kb_workers_alive', values: "1 0 0 0" }
+    alert_rule_test:
+      - { eval_time: 3m, alertname: KBApiDown, exp_alerts: [{ exp_labels: { severity: critical, job: kb-api }, exp_annotations: { summary: "API not reachable by Prometheus", action: "Check the API process / load balancer and GET /readyz." } }] }
+      - { eval_time: 3m, alertname: KBInferenceDown, exp_alerts: [] }
+      - { eval_time: 3m, alertname: KBWorkersDown, exp_alerts: [{ exp_labels: { severity: critical }, exp_annotations: { summary: "No live workers: imports, deletions and cleanup are not progressing", action: "Start kbpy.worker processes; check worker logs." } }] }
+  - interval: 1m
+    input_series:
+      - { series: 'kb_queue_tasks{queue="ingest",status="todo"}', values: "600x40" }
+      - { series: 'kb_job_items{state="succeeded"}', values: "100x40" }
+      - { series: 'kb_job_items{state="failed"}', values: "0 0 0 0 0 20x35" }
+    alert_rule_test:
+      - { eval_time: 35m, alertname: KBQueueStalled, exp_alerts: [{ exp_labels: { severity: warning } , exp_annotations: { summary: "Tasks are queued but no item finished in 15 minutes", action: "Check workers and inference saturation; look for stuck jobs." } }] }
+      - { eval_time: 15m, alertname: KBQueueBacklog, exp_alerts: [{ exp_labels: { severity: warning }, exp_annotations: { summary: "Import backlog above 500 tasks", action: "Add worker / inference capacity (KB_INFERENCE_IMPORT_URL) or GPU." } }] }
+      - { eval_time: 10m, alertname: KBJobItemFailures, exp_alerts: [{ exp_labels: { severity: warning }, exp_annotations: { summary: "More than 10 import items failed in 15 minutes", action: "Read GET /v1/jobs/{id}/items error codes; retry if SERVICE_UNAVAILABLE." } }] }
+  - interval: 1m
+    input_series:
+      - { series: 'kb_queue_tasks{queue="ingest",status="todo"}', values: "5x40" }
+      - { series: 'kb_job_items{state="succeeded"}', values: "0+3x40" }
+    alert_rule_test:
+      - { eval_time: 35m, alertname: KBQueueStalled, exp_alerts: [] }
+      - { eval_time: 35m, alertname: KBQueueBacklog, exp_alerts: [] }
+  - interval: 1m
+    input_series:
+      - { series: 'kb_http_requests_total{method="POST",route="/v1/stores/:id/search",status="200"}', values: "0+60x20" }
+      - { series: 'kb_http_requests_total{method="POST",route="/v1/stores/:id/search",status="500"}', values: "0+30x20" }
+      - { series: 'kb_http_request_duration_seconds_bucket{method="POST",route="/v1/stores/:id/search",le="1"}', values: "0+10x20" }
+      - { series: 'kb_http_request_duration_seconds_bucket{method="POST",route="/v1/stores/:id/search",le="2.5"}', values: "0+20x20" }
+      - { series: 'kb_http_request_duration_seconds_bucket{method="POST",route="/v1/stores/:id/search",le="+Inf"}', values: "0+90x20" }
+      - { series: 'kb_inference_busy', values: "1x20" }
+      - { series: 'kb_inference_waiting', values: "3x20" }
+    alert_rule_test:
+      - { eval_time: 15m, alertname: KBHigh5xxRate, exp_alerts: [{ exp_labels: { severity: critical }, exp_annotations: { summary: "More than 5% of API requests fail with 5xx", action: "Check API logs by request_id and dependencies (/readyz)." } }] }
+      - { eval_time: 15m, alertname: KBSlowSearch, exp_alerts: [{ exp_labels: { severity: warning }, exp_annotations: { summary: "Search p95 latency above 2 s", action: "Check inference saturation and database load; consider separate query inference." } }] }
+      - { eval_time: 15m, alertname: KBInferenceSaturated, exp_alerts: [{ exp_labels: { severity: warning }, exp_annotations: { summary: "Inference busy >90% with requests waiting", action: "Run more inference processes or a GPU host; separate query and import hosts." } }] }

@@ -1,0 +1,66 @@
+# Local development infrastructure. App processes run on the host (see README).
+name: kb
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg18
+    environment:
+      POSTGRES_USER: kb_owner
+      POSTGRES_PASSWORD: ${KB_PG_OWNER_PASSWORD:-dev-owner}
+      POSTGRES_DB: kb
+      KB_API_PASSWORD: ${KB_PG_API_PASSWORD:-dev-api}
+      KB_WORKER_PASSWORD: ${KB_PG_WORKER_PASSWORD:-dev-worker}
+    ports: ["127.0.0.1:54329:5432"]
+    volumes:
+      - pg:/var/lib/postgresql
+      - ./infra/pg-init.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+    healthcheck: {test: ["CMD", "pg_isready", "-U", "kb_owner", "-d", "kb"], interval: 2s, retries: 30}
+  s3:
+    image: chrislusf/seaweedfs:4.26
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/s3.json -master.volumeSizeLimitMB=1024 -volume.max=0
+    ports: ["127.0.0.1:8333:8333"]
+    volumes:
+      - s3:/data
+      - ./infra/s3.json:/etc/s3.json:ro
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm --http-port=8180
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KB_KC_ADMIN_PASSWORD:-dev-admin}
+      KC_HOSTNAME: http://localhost:8180
+    ports: ["127.0.0.1:8180:8180"]
+    volumes:
+      - kc:/opt/keycloak/data              # persists registered accounts across restarts
+      - ./infra/keycloak-realm.json:/opt/keycloak/data/import/kb.json:ro
+      - ./infra/keycloak-theme/kb:/opt/keycloak/themes/kb:ro
+  mailpit:   # DEV ONLY mail catcher: receives verification emails (UI http://localhost:8026)
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:8026:8025"]
+  # ---- observability (metrics are collected, dashboarded and alerted on)
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=15d, --web.enable-lifecycle]
+    ports: ["127.0.0.1:9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/observability/rules.yml:/etc/prometheus/rules.yml:ro
+      - ./infra/observability/rules.test.yml:/etc/prometheus/rules.test.yml:ro
+      - ./infra/observability/metrics-token.dev:/etc/prometheus/metrics-token:ro
+      - prom:/prometheus
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: [--config.file=/etc/alertmanager/alertmanager.yml]
+    ports: ["127.0.0.1:9093:9093"]
+    volumes: [./infra/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro]
+  grafana:
+    image: grafana/grafana:12.1.1
+    ports: ["127.0.0.1:3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${KB_GRAFANA_ADMIN_PASSWORD:-dev-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"        # dev only: read-only dashboards without login
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+volumes: {pg: {}, s3: {}, kc: {}, prom: {}}

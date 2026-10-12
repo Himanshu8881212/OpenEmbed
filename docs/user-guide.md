@@ -1,0 +1,39 @@
+# User guide: tasks with the implemented syntax
+
+This updates the task procedures of the ISO 26514-structured guide (`docs/source/iso-guide.md`, §3–14) to match the software in this repository. Concepts, audiences and the documentation process are unchanged; read the source guide for them. `kb` means `node cli/kb.ts` until a CLI package name is published (open release detail). Every step has an HTTP equivalent; see `docs/api.md`.
+
+Placeholders: `STORE` is a store ID or visible name, and `FILE_ID`/`JOB_ID` are IDs returned by the service.
+
+| Task | CLI | API | Expected result / recovery |
+|---|---|---|---|
+| **T00** Create an account (web) | Open the workbench, choose **Register**, confirm the verification email | Keycloak registration (OIDC `prompt=create`) | You land in onboarding with a generated workspace name. Passwords need 12+ characters. |
+| **T01** Configure and authenticate | `kb config set base-url URL` → `kb auth login` (opens the device-flow URL, enter the code) → `kb workspaces list` / `kb workspaces use ID` → `kb auth status` | `POST /v1/auth/device-sessions`, `POST /v1/auth/token`, `GET /v1/me` | The CLI lists stores in the selected workspace. On 401, sign in again. A missing workspace means you need an owner's invitation (`kb members add EMAIL --role editor`). Scripts use `KB_API_KEY`, not a login session. |
+| **T02** First workflow | `kb stores create manuals` → `kb ingest manuals ./company-material --wait` → `kb search manuals "Replace the pressure sensor" --limit 5` → `kb keys create --store manuals --scope search` → `kb connect manuals --language python` | see T03/T15/T16 | A separate application retrieves evidence with the generated code. |
+| **T03** Import a folder | `kb ingest STORE ./folder [--wait] [--yes]` | upload session → parts → commit (202) | Prints the manifest and the ignored files (hidden, symlinks, unsupported, empty, too large). Asks for confirmation (`--yes` for scripts). With `--wait`: exit 0 completed, 3 completed with errors, 4 failed, 5 cancelled. Re-importing the same folder skips unchanged files and creates new versions of changed ones. |
+| **T04** Recover a transfer | `kb ingest --resume SESSION_ID [--wait]` (the ID is printed when a transfer stops; `kb uploads status SESSION_ID` shows the parts received). In the workbench, choose the same folder again. | `GET /v1/upload-sessions/{id}` then the missing `PUT …/parts/{n}`, then commit | One verified upload, no duplicates. A session expires after 24 h (`SESSION_EXPIRED`). Start again; unchanged bytes are reused. Files changed since the session started are refused. |
+| **T05** Inspect and retry | `kb jobs status JOB_ID` · `kb jobs items JOB_ID --state failed` · `kb jobs retry JOB_ID --wait` | `GET /v1/jobs/{id}`, `/items`, `POST /retry` | Retry creates a new job for retryable items only. Non-retryable items (`UNREADABLE`, `CHECKSUM_MISMATCH`…) need a corrected file (T09 or a re-import). |
+| **T06** Cancel | `kb jobs cancel JOB_ID --wait` | `POST /v1/jobs/{id}/cancel` | Queued items stop now. Running items stop between embedding batches and are never published half-done. Published items remain. |
+| **T07** Inspect a source | `kb files list STORE` · `kb files inspect FILE_ID --segments` · `kb files download FILE_ID -o out` | `GET /v1/files/{id}`, `/segments`, `/content` | Shows the current version, status, stores and segments with page, character or time locations. |
+| **T08** Change metadata | `kb files tag FILE_ID --set department=service [--unset key]` | `PATCH /v1/files/{id}` | No re-embedding (the initial profiles embed no metadata; `reprocessing_required` reports this). Live views that filter on the key update immediately. |
+| **T09** Replace content | `kb files replace FILE_ID ./manual-v2.pdf --wait` | upload (with `replaces_file_id`) → commit → `POST /v1/files/{id}/revisions` | The old version stays searchable until the complete new version publishes. Snapshots keep their pinned version. |
+| **T10** Remove membership | `kb files remove STORE FILE_ID` | `DELETE /v1/stores/{id}/files/{file_id}` | Removes the source from that store immediately. Other stores keep it. |
+| **T11** Create or rename | `kb stores create NAME` · `kb stores rename STORE NEW` · `kb stores info STORE` | `POST /v1/stores`, `PATCH /v1/stores/{id}` | The ID never changes, so connections keep working. |
+| **T12** Merge stores | `kb stores merge A B --into C --wait` | `POST /v1/store-merges` | Compatible profiles only (`409 PROFILE_INCOMPATIBLE`; matching dimensions are not enough). Duplicate sources are removed and vectors reused. For an explicit rebuild: `{"mode":"rebuild","profile_id":…}`. |
+| **T13** Custom store | `kb stores derive PARENT [PARENT…] --name N --mode view\|snapshot --filter @filter.json` | `POST /v1/stores/{id}/derivations` | View: follows parent changes and deletions. Snapshot: pinned versions. Filter format: `{"metadata":{"department":"service"},"path_prefix":"manuals/","media_types":["application/pdf"]}`. |
+| **T14** Delete a store | `kb stores delete STORE --sources unshared\|keep --yes --wait` (shows the preview first) | `POST /v1/stores/{id}/deletion-previews`, `DELETE /v1/stores/{id}?sources=…` | Searches fail at once (404). `unshared` also deletes sources no other store uses. Snapshots and other stores keep shared sources. |
+| **T15** Text search | `kb search STORE "question" --limit 5 [--filter @f.json] [--json]` · media: `--image photo.jpg` | `POST /v1/stores/{id}/search` | Ranked evidence with path, version and location. No results: check `kb stores info`, the filters and permissions. |
+| **T16** Connect an application | `kb keys create --store STORE --scope search` → `kb connect STORE --language python\|javascript\|curl` | `GET /v1/stores/{id}/connection` | The code reads `KNOWLEDGE_API_KEY`. The key is shown once; keep it in a secret manager and the backend, never in browser code. |
+| **T17** Review usage | `kb usage show` | `GET /v1/usage`, `GET /v1/subscription` | Storage by category, monthly indexing and query tokens, warnings at 80 %, hard caps (`429 QUOTA_EXCEEDED`). Plan changes need the (not configured) payment provider. |
+| **T18** Support report | Record the command, `request …` / `x-request-id`, the job ID, `kb --version`, the store profile and index revision (`kb stores info`). Remove keys and content. | | The support channel is an open release detail. |
+| **T19** Revoke a key | `kb keys list` → `kb keys revoke KEY_ID` | `DELETE /v1/api-keys/{id}` | Requests with the key fail on the very next call (delay 0). |
+| **T20** Delete a source | `kb files delete FILE_ID --yes --wait` (preview lists stores, snapshots, views) | `POST /v1/files/{id}/deletion-previews`, `DELETE /v1/files/{id}?scope=workspace` | Inaccessible everywhere at once. Physical removal follows retention (`KB_RETENTION_SECONDS`). Restores replay the deletion ledger. |
+
+Data freedom: `kb stores export STORE -o store.jsonl` (vectors + text + locations), `kb stores split STORE --field department [--mode snapshot]`, `kb profiles create "short" --max-chars 800 --overlap 100` then `kb stores create NAME --profile ws-…` or `kb stores reindex STORE --profile ws-…`. Views can be built on views (3 levels).
+
+Later-release tasks implemented in this build: index rebuild and promotion (`kb stores reindex STORE --profile ID`, `kb stores promote STORE REVISION_ID`, also used for rollback) and scheduled sync from an HTTP manifest (`POST /v1/connectors`; workbench: store → Composition → Scheduled sync).
+
+**Web workbench** uses the same API with your sign-in token:
+- `/`: stores overview, with a profile choice when creating a store.
+- `/stores/{id}`: tabs Search, Files (inspector drawer), Import (drag a folder), Jobs, Composition (derive, split, merge, sync, custom profiles, index revisions) and Settings, plus Connect application and Export embeddings.
+- `/settings`: usage, API keys, members and audit.
+- Press ⌘K / Ctrl+K anywhere to jump.
